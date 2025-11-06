@@ -199,7 +199,8 @@ createDisMatrix_optimized <- function(
         ensemble,
         data,
         type = "terminalNodes",
-        num.threads = 1
+        num.threads = 1,
+        verbose = verbose
       )$predictions %>%
         as.data.frame()
       n_tree <- ensemble[["num_trees"]]

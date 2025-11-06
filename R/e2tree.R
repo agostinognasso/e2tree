@@ -144,7 +144,7 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
   Terms <- attributes(mf)$terms
 
   response <- mf[,1]
-  X <- ordered2factor(mf[,-1]) # Convert ordered factors to regular factors (to change!!!)
+  X <- mf[,-1] # Keep ordered factors as is - they are handled correctly by split()
 
   # create type object
   if (inherits(ensemble, "randomForest")) {
