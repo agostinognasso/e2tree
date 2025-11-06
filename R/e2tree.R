@@ -164,9 +164,9 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
   # Determine classes of all variables in X
   #var_classes <- unlist(lapply(X,class))
   var_classes <- get_classes(X)
-  # Identify indices of factors and character variables
-  ind <- which(var_classes %in% c("factor","character"))
-  # Calculate the number of unique categories for each factor and character variable
+  # Identify indices of factors, character, and ordered variables
+  ind <- which(var_classes %in% c("factor","character","ordered"))
+  # Calculate the number of unique categories for each factor, character, and ordered variable
   ncat <- NULL
   if (length(ind)>0){
     for (i in 1:length(ind)){
@@ -413,14 +413,37 @@ csplit_str <- function(info,X,ncat, call, terms, control, ylevels){
     splits$index[splits$ncat==-1] <- unlist(lapply(varnumerics, function(x) x[2]))
   }
 
+  # index for ordered and categorical predictors
+  # For ordered factors with <= splits, convert level to its ordinal position
+  if(nrow(info)>1 && any(splits$ncat!=-1)){
+    for(i in which(splits$ncat!=-1)){
+      var_name <- splits$variable[i]
+      if(grepl("<=", splits$splitLabel[i]) && var_name %in% names(X)){
+        # This is an ordered factor
+        level_str <- trimws(sub(".*<=\\s*", "", splits$splitLabel[i]))
+        if(inherits(X[[var_name]], "ordered")){
+          # Convert level to ordinal position
+          splits$index[i] <- match(level_str, levels(X[[var_name]]))
+        } else {
+          # Should not happen, but assign sequence as fallback
+          splits$index[i] <- i
+        }
+      } else {
+        # Categorical factor with %in% - assign sequence
+        splits$index[i] <- i
+      }
+    }
+  }
+
   #splits$index <- suppressWarnings(as.numeric(as.numeric(gsub("[^[:digit:]., ]", "",splits$splitLabel))))
-  splits$index[splits$ncat!=-1] <- seq(sum(splits$ncat!=-1))
   splits$index <- as.numeric(splits$index)
 
 
 
+  # Filter only categorical splits (not ordered), which have %in% in splitLabel
   catsplits <- splits %>%
     dplyr::filter(ncat!=-1) %>%
+    dplyr::filter(grepl("%in%", splitLabel)) %>%
     dplyr::mutate(ID = row_number()) %>%
     dplyr::group_by(ID) %>%
     dplyr::mutate(modal = gsub(paste0(variable," %in% "),"",splitLabel))
