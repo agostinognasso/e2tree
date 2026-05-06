@@ -7,6 +7,22 @@
 #endif
 using namespace Rcpp;
 
+// ----------------------------------------------------------------------------
+// Internal: validate that an `obs` data.frame column is a numeric atomic
+// vector. The S3 adapter layer guarantees this, but the C++ functions are
+// also exported via Rcpp and could be called with malformed input. Without
+// this guard, Rcpp would silently coerce non-numeric columns to integer 0
+// and produce a degenerate co-occurrence matrix.
+// ----------------------------------------------------------------------------
+static inline void check_numeric_column(SEXP col, const char* col_name) {
+  int t = TYPEOF(col);
+  if (t != INTSXP && t != REALSXP) {
+    Rcpp::stop("e2tree internal error: column '%s' must be integer or double "
+               "(got SEXP type %d). Did extract_terminal_nodes() return a "
+               "factor or character column?", col_name, t);
+  }
+}
+
 // ============================================================================
 // Fast impurity computation for all candidate splits
 // y: dissimilarity sub-matrix (n_sub x n_sub) for observations in the node
@@ -73,8 +89,14 @@ List compute_cooccurrences_sparse_cpp(
 ) {
   int n = obs.nrows();
 
-  IntegerVector node_column = obs[tree_index + 1];
-  NumericVector resp = obs["resp"];
+  SEXP nc_sexp = obs[tree_index + 1];
+  check_numeric_column(nc_sexp, "Tree column");
+  IntegerVector node_column = (TYPEOF(nc_sexp) == INTSXP)
+      ? IntegerVector(nc_sexp)
+      : as<IntegerVector>(NumericVector(nc_sexp));
+  SEXP resp_sexp = obs["resp"];
+  check_numeric_column(resp_sexp, "resp");
+  NumericVector resp = as<NumericVector>(resp_sexp);
 
   // Group observations by node
   std::unordered_map<int, std::vector<int>> node_groups;
@@ -172,9 +194,15 @@ NumericMatrix compute_cooccurrences_cpp(
 ) {
   int n = obs.nrows();
   NumericMatrix co_occurrences(n, n);
-  
-  IntegerVector node_column = obs[tree_index + 1]; // Colonna dei nodi
-  NumericVector resp = obs["resp"];               // Colonna delle risposte
+
+  SEXP nc_sexp = obs[tree_index + 1];
+  check_numeric_column(nc_sexp, "Tree column");
+  IntegerVector node_column = (TYPEOF(nc_sexp) == INTSXP)
+      ? IntegerVector(nc_sexp)
+      : as<IntegerVector>(NumericVector(nc_sexp));
+  SEXP resp_sexp = obs["resp"];
+  check_numeric_column(resp_sexp, "resp");
+  NumericVector resp = as<NumericVector>(resp_sexp);
   
   // Raggruppa osservazioni per nodo
   std::unordered_map<int, std::vector<int>> node_groups;
@@ -257,18 +285,25 @@ NumericMatrix compute_all_cooccurrences_cpp(
     double maxvar = NA_REAL
 ) {
   int n = obs.nrows();
-  NumericVector resp = obs["resp"];
+  SEXP resp_sexp = obs["resp"];
+  check_numeric_column(resp_sexp, "resp");
+  NumericVector resp = as<NumericVector>(resp_sexp);
 
   // Pre-extract all tree columns as integer vectors
   // obs layout: [OBS(0), Tree1(1), Tree2(2), ..., TreeN(ntree), resp(ntree+1)]
   // Tree columns may be numeric (ranger) or integer (randomForest),
-  // so we read as NumericVector and convert to int on the fly.
+  // so we validate the type up-front then convert to int.
   std::vector<std::vector<int>> tree_cols(ntree);
   for (int t = 0; t < ntree; t++) {
-    NumericVector col = as<NumericVector>(obs[t + 1]);
+    SEXP col_sexp = obs[t + 1];
+    check_numeric_column(col_sexp, "Tree column");
     tree_cols[t].resize(n);
-    for (int i = 0; i < n; i++) {
-      tree_cols[t][i] = static_cast<int>(col[i]);
+    if (TYPEOF(col_sexp) == INTSXP) {
+      IntegerVector col(col_sexp);
+      for (int i = 0; i < n; i++) tree_cols[t][i] = col[i];
+    } else {
+      NumericVector col(col_sexp);
+      for (int i = 0; i < n; i++) tree_cols[t][i] = static_cast<int>(col[i]);
     }
   }
 

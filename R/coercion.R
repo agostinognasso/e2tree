@@ -9,8 +9,9 @@
 #' (e.g., via \code{rpart.plot}), and prediction.
 #'
 #' @param x An e2tree object.
-#' @param ensemble The ensemble model (randomForest or ranger) used to
-#'   build the E2Tree.
+#' @param ensemble The ensemble model used to build the E2Tree. Supported classes:
+#'   \code{randomForest}, \code{ranger}, \code{xgb.Booster}, \code{lgb.Booster},
+#'   \code{gbm}, \code{catboost.CatBoost}.
 #' @param ... Additional arguments (ignored).
 #'
 #' @return An \code{rpart} object.
@@ -43,6 +44,17 @@ as.rpart <- function(x, ...) {
 #' @method as.rpart e2tree
 #' @export
 as.rpart.e2tree <- function(x, ensemble, ...) {
+  expected <- attr(x, "ensemble_backend")
+  actual   <- ensemble_backend(ensemble)
+  if (!is.null(expected) && !is.na(expected) && !is.na(actual) &&
+      expected != actual) {
+    warning(sprintf(
+      paste0("as.rpart(): the e2tree was built from a '%s' ensemble but ",
+             "you passed a '%s'. The split labels will still print, but ",
+             "any backend-specific information will be incorrect."),
+      expected, actual
+    ), call. = FALSE)
+  }
   rpart2Tree(fit = x, ensemble = ensemble)
 }
 

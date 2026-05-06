@@ -53,7 +53,28 @@ utils::globalVariables(c("resp", "W", "data_XGB", "i"))
 #' \itemize{
 #'   \item `randomForest`
 #'   \item `ranger`
+#'   \item `xgb.Booster` (xgboost)
+#'   \item `lgb.Booster` (lightgbm)
+#'   \item `gbm` (gbm)
+#'   \item `catboost.CatBoost` (catboost)
 #' }
+#'
+#' @section Interpretation note (RF vs boosting):
+#' For *bagging* ensembles (\code{randomForest}, \code{ranger}) the trees are
+#' grown independently on bootstrap samples; co-occurrence in the same leaf
+#' captures local similarity in the predictor space. For *boosting* ensembles
+#' (\code{xgb.Booster}, \code{lgb.Booster}, \code{gbm}, \code{catboost})
+#' each tree is fit to the residual of the previous ones, so leaf
+#' co-occurrence reflects similarity in the *error-correction trajectory*
+#' rather than in the final prediction space. The resulting dissimilarity
+#' matrices therefore have systematically different scales (typically
+#' \eqn{\bar D \in [0.85, 0.95]} for bagging vs. \eqn{[0.35, 0.70]} for
+#' boosting). The surrogate tree built on top of \code{D} should be
+#' interpreted accordingly.
+#'
+#' The returned matrix carries an \code{ensemble_backend} attribute identifying
+#' the backend used, which downstream functions check to detect mismatched
+#' \code{(D, ensemble)} pairs.
 #'
 #' @examples
 #' \donttest{
@@ -108,22 +129,26 @@ createDisMatrix <- function(
   # === Input Validation ===
   if (is.null(ensemble)) {
     stop(
-      "Error: 'ensemble' cannot be NULL. Please provide a trained randomForest or ranger model."
+      paste0("Error: 'ensemble' cannot be NULL. ",
+           "Please provide a trained randomForest, ranger, xgb.Booster, ",
+           "lgb.Booster, gbm, or catboost.CatBoost model.")
     )
   }
 
-  if (!inherits(ensemble, c("randomForest", "ranger"))) {
-    stop("Error: 'ensemble' must be of class 'randomForest' or 'ranger'")
-  }
+  # Validate ensemble via adapter dispatch (throws informative error for unsupported classes)
+  tryCatch(
+    get_ensemble_type(ensemble),
+    error = function(e) stop(conditionMessage(e), call. = FALSE)
+  )
 
   if (!is.data.frame(data)) {
     stop("Error: 'data' must be a valid data frame.")
   }
 
-  if (
-    !is.character(label) || length(label) != 1 || !(label %in% colnames(data))
-  ) {
-    stop("Error: 'label' must be a valid column name in 'data'.")
+  if (!is.null(label)) {
+    if (!is.character(label) || length(label) != 1 || !(label %in% colnames(data))) {
+      stop("Error: 'label' must be a valid column name in 'data'.")
+    }
   }
 
   row.names(data) <- NULL
@@ -171,18 +196,17 @@ createDisMatrix <- function(
   }
 
   # === Determine Ensemble Type ===
-  if (inherits(ensemble, "ranger")) {
-    type <- tolower(ensemble[["treetype"]])
+  type <- get_ensemble_type(ensemble)
+  if (!(type %in% c("classification", "regression"))) {
+    stop("'ensemble' must be a classification or regression model.", call. = FALSE)
+  }
 
-    if (!(type %in% c("classification", "regression"))) {
-      stop("ranger model should be either a classification or regression type")
-    }
-
-    if (is.null(ensemble$forest)) {
-      stop("ranger model should be trained with `write.forest = TRUE`")
-    }
-  } else {
-    type <- ensemble$type
+  # `label` is mandatory for regression (used to compute the dissimilarity
+  # scale).  Validate up front so the error surfaces before any leaf
+  # extraction work is wasted.
+  if (type == "regression" && is.null(label)) {
+    stop("Error: 'label' is required for regression models (needed to compute dissimilarity scale).",
+         call. = FALSE)
   }
 
   # === Extract Terminal Nodes ===
@@ -190,29 +214,24 @@ createDisMatrix <- function(
     cat("\nExtracting terminal nodes...\n")
   }
 
-  switch(
-    class(ensemble)[length(class(ensemble))],
-    randomForest = {
-      obs <- as.data.frame(attr(
-        predict(ensemble, newdata = data, nodes = TRUE),
-        "nodes"
-      ))
-      n_tree <- ensemble$ntree
-    },
-    ranger = {
-      obs <- predict(
-        ensemble,
-        data,
-        type = "terminalNodes",
-        num.threads = 1
-      )$predictions %>%
-        as.data.frame()
-      n_tree <- ensemble[["num_trees"]]
-    }
-  )
+  backend <- ensemble_backend(ensemble)
+  # CatBoost adapters strip the response column from the predictor pool via
+  # the `e2tree_label` attribute; set it transparently when the user passes
+  # `label` so the workflow matches the other backends.
+  if (!is.null(label) &&
+      backend %in% c("catboost.CatBoost", "catboost.Model") &&
+      is.null(attr(ensemble, "e2tree_label"))) {
+    attr(ensemble, "e2tree_label") <- label
+  }
+  obs <- extract_terminal_nodes(ensemble, data)
+  validate_terminal_nodes(obs, data, backend = backend)
 
   class(data) <- "data.frame"
-  if (!inherits(data[[label]], "factor")) {
+  # `label` is mandatory for regression (used to compute the dissimilarity
+  # scale) but optional for classification (where it only annotates `resp`
+  # for downstream code). Guard against NULL label before any data[[label]]
+  # access; classification with NULL label proceeds with a dummy resp.
+  if (!is.null(label) && !inherits(data[[label]], "factor")) {
     data[[label]] <- factor(data[[label]])
   }
 
@@ -220,10 +239,15 @@ createDisMatrix <- function(
   names(obs) <- c("OBS", paste("Tree", seq(1, (ncol(obs) - 1L)), sep = ""))
   row.names(obs) <- NULL
 
-  if (type == "classification") {
-    obs$resp <- data[as.numeric(obs$OBS), label]
-  } else {
+  if (type == "regression") {
+    if (is.null(label)) {
+      stop("Error: 'label' is required for regression models (needed to compute dissimilarity scale).")
+    }
     obs$resp <- as.numeric(as.character(data[obs$OBS, label]))
+  } else {
+    # classification: resp is used only as metadata; use dummy when label is NULL
+    obs$resp <- if (!is.null(label)) data[as.numeric(obs$OBS), label] else
+      factor(rep(1L, nrow(obs)))
   }
 
   ntree <- ncol(obs) - 2L
@@ -273,13 +297,33 @@ createDisMatrix <- function(
     cat("\n=== COMPUTING FINAL DISSIMILARITY MATRIX (C++) ===\n")
   }
 
-  # === Dissimilarity: 1 - a[i,j] / max(a[i,i], a[j,j]) — done in C++ ===
-  dis <- compute_dissimilarity_from_cooc_cpp(a)
-  row.names(dis) <- colnames(dis) <- obs$OBS
+  # === Dissimilarity: 1 - a[i,j] / max(a[i,i], a[j,j]) ===
+  if (use_chunking) {
+    if (verbose) {
+      cat(sprintf("Using chunked R path (chunk size: %d)\n", chunk_size))
+    }
+    dis <- compute_dissimilarity_chunked(a, obs, chunk_size, verbose = verbose)
+  } else {
+    dis <- compute_dissimilarity_from_cooc_cpp(a)
+    row.names(dis) <- colnames(dis) <- obs$OBS
+  }
 
   rm(a)
 
+  if (isTRUE(use_disk)) {
+    if (!dir.exists(temp_dir)) dir.create(temp_dir, recursive = TRUE)
+    out_path <- file.path(temp_dir,
+                          sprintf("e2tree_dismatrix_%d.rds", as.integer(Sys.time())))
+    saveRDS(dis, file = out_path)
+    if (verbose) cat(sprintf("Dissimilarity matrix written to %s\n", out_path))
+    attr(dis, "disk_path") <- out_path
+  }
+
   gc(verbose = FALSE, full = TRUE)
+
+  # Tag with backend identity so downstream functions (as.rpart, e2tree, ...)
+  # can detect mismatched (D, ensemble) pairs.
+  attr(dis, "ensemble_backend") <- backend
 
   if (verbose) {
     cat("\n=== COMPUTATION COMPLETED ===\n")

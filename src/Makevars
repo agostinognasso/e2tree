@@ -1,2 +1,5 @@
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS)
 PKG_LIBS = $(SHLIB_OPENMP_CXXFLAGS)
+
+# Note: always install with --preclean on this platform to avoid binary mismatch
+# R CMD INSTALL . --no-multiarch --preclean

@@ -1,0 +1,357 @@
+---
+title: "Using e2tree with XGBoost, GBM, LightGBM, and CatBoost"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Using e2tree with XGBoost, GBM, LightGBM, and CatBoost}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE   # examples require optional packages; set eval=TRUE locally
+)
+```
+
+## Overview
+
+Starting from version 1.1.0, `e2tree` supports the following tree ensemble
+backends in addition to `randomForest` and `ranger`:
+
+| Package | Model class | Task |
+|---------|-------------|------|
+| **xgboost** | `xgb.Booster` | classification, regression |
+| **gbm** | `gbm` | classification, regression |
+| **lightgbm** | `lgb.Booster` | classification, regression |
+| **catboost** | `catboost.CatBoost` / `catboost.Model` | classification, regression |
+
+The workflow is identical regardless of the backend: train a model, build the
+dissimilarity matrix with `createDisMatrix()`, then call `e2tree()`.
+
+---
+
+## XGBoost
+
+### Classification (iris)
+
+```{r xgb-clf}
+library(e2tree)
+library(xgboost)
+
+data(iris)
+set.seed(42)
+n  <- floor(0.75 * nrow(iris))
+tr <- iris[sample(nrow(iris), n), ]
+va <- iris[setdiff(seq_len(nrow(iris)), as.integer(rownames(tr))), ]
+
+# XGBoost requires a numeric matrix and 0-indexed integer labels
+X_tr <- as.matrix(tr[, 1:4])
+y_tr <- as.integer(tr$Species) - 1L
+dm_tr <- xgb.DMatrix(data = X_tr, label = y_tr)
+
+ensemble <- xgb.train(
+  params  = list(objective  = "multi:softmax",
+                 num_class  = 3,
+                 max_depth  = 4,
+                 eta        = 0.3),
+  data    = dm_tr,
+  nrounds = 100,
+  verbose = 0
+)
+
+# Attach the response back to the data.frame so the formula in e2tree()
+# can find it; createDisMatrix() will use it to annotate the dissimilarity
+# matrix (in classification, `label` is optional but recommended).
+tr_xgb         <- tr[, 1:4]
+tr_xgb$Species <- tr$Species
+
+D <- createDisMatrix(ensemble, data = tr_xgb, label = "Species",
+                     parallel = list(active = FALSE, no_cores = 1))
+
+setting  <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
+tree_xgb <- e2tree(Species ~ ., data = tr_xgb, D = D,
+                   ensemble = ensemble, setting = setting)
+print(tree_xgb)
+```
+
+### Regression (mtcars)
+
+For regression backends, `createDisMatrix()` needs the response column to
+compute the dissimilarity scale. Pass the full data frame (predictors plus
+response) and the name of the response column via the `label` argument.
+
+```{r xgb-reg}
+library(xgboost)
+
+data(mtcars)
+set.seed(42)
+n  <- floor(0.75 * nrow(mtcars))
+tr <- mtcars[sample(nrow(mtcars), n), ]
+
+X_tr  <- as.matrix(tr[, -1])
+y_tr  <- tr$mpg
+dm_tr <- xgb.DMatrix(data = X_tr, label = y_tr)
+
+ensemble <- xgb.train(
+  params  = list(objective = "reg:squarederror", max_depth = 4, eta = 0.3),
+  data    = dm_tr,
+  nrounds = 100,
+  verbose = 0
+)
+
+# `data = tr` carries the response column too; the XGBoost adapter
+# automatically trims the matrix to the features used at training time.
+D    <- createDisMatrix(ensemble, data = tr, label = "mpg",
+                        parallel = list(active = FALSE, no_cores = 1))
+tree <- e2tree(mpg ~ ., data = tr, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 1e-6, n = 2, level = 5))
+print(tree)
+```
+
+---
+
+## GBM
+
+### Classification (iris, binary)
+
+`gbm` expects a 0/1 numeric response for the `bernoulli` distribution, while
+`e2tree` expects a factor response for classification. We therefore train
+`gbm` on the integer column and pass a factor copy of the same column to
+`e2tree`.
+
+```{r gbm-clf}
+library(gbm)
+
+data(iris)
+set.seed(42)
+df       <- iris
+df$is_setosa     <- as.integer(df$Species == "setosa")
+df$is_setosa_fct <- factor(df$is_setosa, levels = c(0L, 1L))
+n  <- floor(0.75 * nrow(df))
+tr <- df[sample(nrow(df), n), ]
+
+ensemble <- gbm(is_setosa ~ Sepal.Length + Sepal.Width + Petal.Length + Petal.Width,
+                data              = tr,
+                distribution      = "bernoulli",
+                n.trees           = 200,
+                interaction.depth = 4,
+                verbose           = FALSE)
+
+D    <- createDisMatrix(ensemble,
+                        data     = tr[, c("Sepal.Length","Sepal.Width",
+                                          "Petal.Length","Petal.Width",
+                                          "is_setosa_fct")],
+                        label    = "is_setosa_fct",
+                        parallel = list(active = FALSE, no_cores = 1))
+tree <- e2tree(is_setosa_fct ~ Sepal.Length + Sepal.Width +
+                               Petal.Length + Petal.Width,
+               data = tr, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5))
+print(tree)
+```
+
+### Regression (mtcars)
+
+`gbm` requires `nTrain * bag.fraction > 2 * n.minobsinnode + 1`, which fails
+on small training sets such as 24-row `mtcars` with the default settings.
+Lower `n.minobsinnode` and raise `bag.fraction` to keep the example
+self-contained.
+
+```{r gbm-reg}
+library(gbm)
+
+data(mtcars)
+set.seed(42)
+n  <- floor(0.75 * nrow(mtcars))
+tr <- mtcars[sample(nrow(mtcars), n), ]
+
+ensemble <- gbm(mpg ~ ., data = tr,
+                distribution      = "gaussian",
+                n.trees           = 200,
+                interaction.depth = 4,
+                n.minobsinnode    = 2,
+                bag.fraction      = 0.8,
+                verbose           = FALSE)
+
+D    <- createDisMatrix(ensemble, data = tr, label = "mpg",
+                        parallel = list(active = FALSE, no_cores = 1))
+tree <- e2tree(mpg ~ ., data = tr, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 1e-6, n = 2, level = 5))
+print(tree)
+```
+
+---
+
+## LightGBM
+
+### Classification (iris)
+
+```{r lgb-clf}
+library(lightgbm)
+
+data(iris)
+set.seed(42)
+n  <- floor(0.75 * nrow(iris))
+tr <- iris[sample(nrow(iris), n), ]
+
+X_tr <- as.matrix(tr[, 1:4])
+y_tr <- as.integer(tr$Species) - 1L
+ds   <- lgb.Dataset(X_tr, label = y_tr)
+
+ensemble <- lgb.train(
+  params  = list(objective  = "multiclass",
+                 num_class  = 3,
+                 num_leaves = 15,
+                 verbose    = -1),
+  data    = ds,
+  nrounds = 100
+)
+
+tr_lgb         <- tr[, 1:4]
+tr_lgb$Species <- tr$Species
+
+D <- createDisMatrix(ensemble, data = tr_lgb, label = "Species",
+                     parallel = list(active = FALSE, no_cores = 1))
+
+tree <- e2tree(Species ~ ., data = tr_lgb, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5))
+print(tree)
+```
+
+### Regression (mtcars)
+
+```{r lgb-reg}
+library(lightgbm)
+
+data(mtcars)
+set.seed(42)
+n  <- floor(0.75 * nrow(mtcars))
+tr <- mtcars[sample(nrow(mtcars), n), ]
+
+X_tr <- as.matrix(tr[, -1])
+y_tr <- tr$mpg
+ds   <- lgb.Dataset(X_tr, label = y_tr)
+
+ensemble <- lgb.train(
+  params  = list(objective        = "regression",
+                 num_leaves       = 8,
+                 min_data_in_leaf = 2,
+                 learning_rate    = 0.1,
+                 verbose          = -1),
+  data    = ds,
+  nrounds = 200
+)
+
+# Pass the response column to createDisMatrix() via `label`. The
+# LightGBM adapter selects the columns it needs through the booster's
+# stored feature names, so any extra columns in `data` are ignored.
+D    <- createDisMatrix(ensemble, data = tr, label = "mpg",
+                        parallel = list(active = FALSE, no_cores = 1))
+tree <- e2tree(mpg ~ ., data = tr, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 1e-6, n = 2, level = 5))
+print(tree)
+```
+
+---
+
+## CatBoost
+
+CatBoost is distributed separately and must be installed from GitHub:
+
+```{r catboost-install, eval = FALSE}
+# install.packages("remotes")
+remotes::install_github(                                                                                                        
+    "catboost/catboost",                 
+    subdir = "catboost/R-package",       
+    INSTALL_opts = c("--no-staged-install", "--no-multiarch", "--no-test-load")
+  ) 
+```
+
+### Classification (iris)
+
+```{r catboost-clf}
+library(catboost)
+
+data(iris)
+set.seed(42)
+n  <- floor(0.75 * nrow(iris))
+tr <- iris[sample(nrow(iris), n), ]
+
+pool_tr <- catboost.load_pool(
+  data  = tr[, 1:4],
+  label = as.integer(tr$Species) - 1L
+)
+
+ensemble <- catboost.train(
+  pool_tr,
+  params = list(loss_function = "MultiClass",
+                iterations    = 100,
+                logging_level = "Silent")
+)
+# Store label column name so the adapter can strip it from newdata
+attr(ensemble, "e2tree_label") <- "Species"
+
+D    <- createDisMatrix(ensemble, data = tr, label = "Species",
+                        parallel = list(active = FALSE, no_cores = 1))
+tree <- e2tree(Species ~ ., data = tr, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5))
+print(tree)
+```
+
+### Regression (mtcars)
+
+```{r catboost-reg}
+library(catboost)
+
+data(mtcars)
+set.seed(42)
+n  <- floor(0.75 * nrow(mtcars))
+tr <- mtcars[sample(nrow(mtcars), n), ]
+
+pool_tr <- catboost.load_pool(
+  data  = tr[, -1],
+  label = tr$mpg
+)
+
+ensemble <- catboost.train(
+  pool_tr,
+  params = list(loss_function  = "RMSE",
+                iterations     = 100,
+                logging_level  = "Silent")
+)
+attr(ensemble, "e2tree_label") <- "mpg"
+
+D    <- createDisMatrix(ensemble, data = tr, label = "mpg",
+                        parallel = list(active = FALSE, no_cores = 1))
+tree <- e2tree(mpg ~ ., data = tr, D = D, ensemble = ensemble,
+               setting = list(impTotal = 0.1, maxDec = 1e-6, n = 2, level = 5))
+print(tree)
+```
+
+---
+
+## Adding a new backend
+
+To support a further model class `MyEnsemble`, implement three S3 methods and
+register them in `NAMESPACE`:
+
+```r
+# In R/adapters.R (or a separate R/adapter_mymodel.R)
+
+get_ensemble_type.MyEnsemble <- function(ensemble) {
+  # return "classification" or "regression"
+}
+
+extract_terminal_nodes.MyEnsemble <- function(ensemble, data) {
+  # return data.frame of (n_obs × n_trees) terminal node IDs
+}
+
+get_ensemble_predictions.MyEnsemble <- function(ensemble, data, type) {
+  # return numeric vector of length n_obs
+}
+```
+
+No changes to `createDisMatrix()`, `e2tree()`, or any other core function are
+required.

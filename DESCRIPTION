@@ -1,6 +1,6 @@
 Package: e2tree
 Title: Explainable Ensemble Trees
-Version: 1.0.0.9000
+Version: 1.1.0
 Authors@R: c(
     person(given = "Massimo",
            family = "Aria",
@@ -9,7 +9,7 @@ Authors@R: c(
            comment = c(ORCID = "0000-0002-8517-9411")),
            person(given = "Agostino",
            family = "Gnasso",
-           role = c("aut"),
+           role = c("aut", "cph"),
            email = "agostino.gnasso@unina.it",
            comment = c(ORCID = "0000-0002-8046-3923"))
            )
@@ -40,8 +40,11 @@ Suggests:
     jsonlite,
     knitr,
     partykit,
+    gbm,
+    lightgbm,
     randomForest,
     ranger,
+    xgboost,
     rmarkdown,
     rpart.plot,
     RSpectra,

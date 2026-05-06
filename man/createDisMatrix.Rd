@@ -81,8 +81,31 @@ Supported ensemble types for \emph{classification} or \emph{regression} tasks:
 \itemize{
 \item \code{randomForest}
 \item \code{ranger}
+\item \code{xgb.Booster} (xgboost)
+\item \code{lgb.Booster} (lightgbm)
+\item \code{gbm} (gbm)
+\item \code{catboost.CatBoost} (catboost)
 }
 }
+\section{Interpretation note (RF vs boosting)}{
+
+For \emph{bagging} ensembles (\code{randomForest}, \code{ranger}) the trees are
+grown independently on bootstrap samples; co-occurrence in the same leaf
+captures local similarity in the predictor space. For \emph{boosting} ensembles
+(\code{xgb.Booster}, \code{lgb.Booster}, \code{gbm}, \code{catboost})
+each tree is fit to the residual of the previous ones, so leaf
+co-occurrence reflects similarity in the \emph{error-correction trajectory}
+rather than in the final prediction space. The resulting dissimilarity
+matrices therefore have systematically different scales (typically
+\eqn{\bar D \in [0.85, 0.95]} for bagging vs. \eqn{[0.35, 0.70]} for
+boosting). The surrogate tree built on top of \code{D} should be
+interpreted accordingly.
+
+The returned matrix carries an \code{ensemble_backend} attribute identifying
+the backend used, which downstream functions check to detect mismatched
+\code{(D, ensemble)} pairs.
+}
+
 \examples{
 \donttest{
 data("iris")

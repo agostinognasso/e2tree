@@ -189,7 +189,9 @@ summary.e2tree <- function(object, ...) {
 #'
 #' @param x An e2tree object
 #' @param ensemble The ensemble model (randomForest or ranger).
-#'   Required for converting the tree to rpart format.
+#'   Required for converting the tree to rpart format. Supported classes:
+#'   \code{randomForest}, \code{ranger}, \code{xgb.Booster}, \code{lgb.Booster},
+#'   \code{gbm}, \code{catboost.CatBoost}.
 #' @param main Plot title. Default is "E2Tree".
 #' @param ... Additional arguments passed to \code{rpart.plot::rpart.plot}
 #'
@@ -199,7 +201,7 @@ plot.e2tree <- function(x, ensemble = NULL, main = "E2Tree", ...) {
 
   if (is.null(ensemble)) {
     stop("'ensemble' argument is required for plotting. ",
-         "Pass the randomForest/ranger model used to build the E2Tree.")
+         "Pass the ensemble model (randomForest, ranger, xgb.Booster, lgb.Booster, gbm, catboost.CatBoost) used to build the E2Tree.")
   }
 
   if (!requireNamespace("rpart.plot", quietly = TRUE)) {

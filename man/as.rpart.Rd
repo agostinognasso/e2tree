@@ -14,8 +14,9 @@ as.rpart(x, ...)
 
 \item{...}{Additional arguments (ignored).}
 
-\item{ensemble}{The ensemble model (randomForest or ranger) used to
-build the E2Tree.}
+\item{ensemble}{The ensemble model used to build the E2Tree. Supported classes:
+\code{randomForest}, \code{ranger}, \code{xgb.Booster}, \code{lgb.Booster},
+\code{gbm}, \code{catboost.CatBoost}.}
 }
 \value{
 An \code{rpart} object.
