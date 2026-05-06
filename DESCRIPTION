@@ -40,7 +40,6 @@ Suggests:
     jsonlite,
     knitr,
     partykit,
-    catboost,
     gbm,
     lightgbm,
     randomForest,
