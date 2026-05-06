@@ -41,8 +41,11 @@ moda <- function(x) {
   if ( anyNA(x) ) x = x[!is.na(x)]
   ux <- unique(x)
   tab <- tabulate(match(x, ux))
-  res <- c(ux[which.max(tab)[1]], max(tab)[1]/sum(tab))
-  res[1] <- as.character(levels(x)[res[1]])
-  return(res)
-  
+  mode_val <- ux[which.max(tab)[1]]
+  freq     <- max(tab)[1] / sum(tab)
+  # `mode_val` may be a factor element, an integer (e.g., 0/1 binary
+  # classification fed by gbm bernoulli), a character or a numeric value;
+  # coerce uniformly to character so the caller can store it next to a
+  # numeric frequency without triggering a length-zero replacement.
+  c(as.character(mode_val), freq)
 }

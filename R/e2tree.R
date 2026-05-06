@@ -108,23 +108,39 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
     stop("Error: 'D' must be a square dissimilarity matrix.")
   }
   
-  # Validate ensemble
-  if (inherits(ensemble, "randomForest")) {
-    type <- ensemble$type
-    if (!type %in% c("classification", "regression")) {
-      stop("Error: 'type' in ensemble object must be 'classification' or 'regression'.")
-    }
-    
-  } else if (inherits(ensemble, "ranger")) {
-    type <- ensemble$treetype
-    if (!type %in% c("Classification", "Regression")) {
-      stop("Error: 'type' in ensemble object must be 'classification' or 'regression'.")
-    }
-    
-  } else {
-    stop("Error: 'ensemble' must be a trained 'randomForest' or 'ranger' model.")
+  # Validate ensemble: keep the legacy message for the common NULL / generic-list
+  # cases so existing user code and tests that match those exact strings keep
+  # working; for any other unsupported class we delegate to the adapter
+  # dispatch (which lists the supported backends).
+  if (is.null(ensemble) || is.na(ensemble_backend(ensemble))) {
+    stop("Error: 'ensemble' must be a trained 'randomForest' or 'ranger' model.",
+         call. = FALSE)
   }
-  
+  type <- tryCatch(
+    get_ensemble_type(ensemble),
+    error = function(e) stop(conditionMessage(e), call. = FALSE)
+  )
+  if (!tolower(type) %in% c("classification", "regression")) {
+    stop("Error: 'type' in ensemble object must be 'classification' or 'regression'.",
+         call. = FALSE)
+  }
+
+  # Verify (D, ensemble) consistency: createDisMatrix tags D with the backend
+  # used to build it.  A mismatch usually means the user has reused an old D
+  # with a different model, which yields meaningless splits.
+  d_backend <- attr(D, "ensemble_backend")
+  ens_backend <- ensemble_backend(ensemble)
+  if (!is.null(d_backend) && !is.na(d_backend) && !is.na(ens_backend) &&
+      d_backend != ens_backend) {
+    warning(sprintf(
+      paste0("e2tree(): D was built from a '%s' ensemble but a '%s' was ",
+             "passed. Re-run createDisMatrix() with the same ensemble for ",
+             "consistent results."),
+      d_backend, ens_backend
+    ), call. = FALSE)
+  }
+
+
   # Validate setting
   if (!is.list(setting) || !all(c("impTotal", "maxDec", "n", "level") %in% names(setting))) {
     stop("Error: 'setting' must be a list with keys: 'impTotal', 'maxDec', 'n', and 'level'.")
@@ -207,10 +223,17 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
   }
   
   N <- NULL
-  
+
+  # Pre-compute training predictions once (used for regression MSE per node)
+  ensemble_preds <- if (tolower(type) == "regression") {
+    get_ensemble_predictions(ensemble, data, tolower(type))
+  } else {
+    NULL
+  }
+
   ### variance in the root node
   vart1 = ifelse(type=="regression", variance(response), NA)
-  
+
   while(length(nterm)>0){
     t <- tail(nterm,1)
     #print(t)
@@ -226,7 +249,7 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
              res <- moda(response[index])
            },
            regression={
-             res <- c(mean(response[index]), sum((response[index] - ensemble$predicted[index])^2)) # mean and MSE
+             res <- c(mean(response[index]), sum((response[index] - ensemble_preds[index])^2)) # mean and MSE
            })
     ###
     
@@ -374,7 +397,10 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
   object$data <- data
 
   class(object) <- c("e2tree", "list")
-  
+
+  # Propagate backend tag from D so coercion methods can detect mismatches.
+  attr(object, "ensemble_backend") <- attr(D, "ensemble_backend")
+
   return(object)
 }
 

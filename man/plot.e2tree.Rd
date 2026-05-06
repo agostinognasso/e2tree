@@ -10,7 +10,9 @@
 \item{x}{An e2tree object}
 
 \item{ensemble}{The ensemble model (randomForest or ranger).
-Required for converting the tree to rpart format.}
+Required for converting the tree to rpart format. Supported classes:
+\code{randomForest}, \code{ranger}, \code{xgb.Booster}, \code{lgb.Booster},
+\code{gbm}, \code{catboost.CatBoost}.}
 
 \item{main}{Plot title. Default is "E2Tree".}
 

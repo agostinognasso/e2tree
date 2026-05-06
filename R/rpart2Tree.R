@@ -7,7 +7,8 @@ utils::globalVariables(c("n","prob", "terminal"))
 #' This function is kept for backward compatibility.
 #'
 #' @param fit is e2tree object.
-#' @param ensemble is an ensemble tree object (for the moment ensemble works only with random forest objects).
+#' @param ensemble A trained ensemble model. Supported classes: \code{randomForest}, \code{ranger},
+#'   \code{xgb.Booster}, \code{lgb.Booster}, \code{gbm}, \code{catboost.CatBoost}.
 #'
 #' @return An rpart object. It contains the following components:
 #' \tabular{lll}{
@@ -73,38 +74,28 @@ rpart2Tree <- function(fit, ensemble){
     stop("Error: 'fit' must be an 'e2tree' object.")
   }
   
-  # Validate 'ensemble' (must be a trained 'randomForest' or 'ranger' model)
-  if (inherits(ensemble, "randomForest")) {
-    type <- ensemble$type
-    if (!type %in% c("classification", "regression")) {
-      stop("Error: 'type' in ensemble object must be either 'classification' or 'regression'.")
-    }
-    
-  } else if (inherits(ensemble, "ranger")) {
-    type <- ensemble$treetype
-    if (!type %in% c("Classification", "Regression")) {
-      stop("Error: 'type' in ensemble object must be either 'classification' or 'regression'.")
-    }
-    
-  } else {
-    stop("Error: 'ensemble' must be a trained 'randomForest' or 'ranger' model.")
+  # Validate 'ensemble' via adapter (supports all ensemble backends).
+  # Preserve the legacy error message for NULL / generic-list inputs so that
+  # existing user code matching that exact string keeps working.
+  if (is.null(ensemble) || is.na(ensemble_backend(ensemble))) {
+    stop("Error: 'ensemble' must be a trained 'randomForest' or 'ranger' model.",
+         call. = FALSE)
   }
-  
+  type <- tryCatch(
+    get_ensemble_type(ensemble),
+    error = function(e) stop(conditionMessage(e), call. = FALSE)
+  )
+  if (!tolower(type) %in% c("classification", "regression")) {
+    stop("Error: 'type' in ensemble object must be either 'classification' or 'regression'.",
+         call. = FALSE)
+  }
+
   # Validate that 'fit$tree' exists and is a data frame
   if (!is.data.frame(fit$tree)) {
     stop("Error: 'fit$tree' must be a data frame.")
   }
-  
+
   # === Proceed with the function ===
-  
-  # create type object
-  if (inherits(ensemble, "randomForest")) {
-    type <- ensemble$type  # "classification" or "regression"
-    
-  } else if (inherits(ensemble, "ranger")) {
-    # Convert "Classification" or "Regression" in lower case
-    type <- tolower(ensemble$treetype)
-  }
   
   frame <- fit$tree
   

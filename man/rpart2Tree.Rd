@@ -9,7 +9,8 @@ rpart2Tree(fit, ensemble)
 \arguments{
 \item{fit}{is e2tree object.}
 
-\item{ensemble}{is an ensemble tree object (for the moment ensemble works only with random forest objects).}
+\item{ensemble}{A trained ensemble model. Supported classes: \code{randomForest}, \code{ranger},
+\code{xgb.Booster}, \code{lgb.Booster}, \code{gbm}, \code{catboost.CatBoost}.}
 }
 \value{
 An rpart object. It contains the following components:
