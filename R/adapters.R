@@ -128,13 +128,20 @@ get_ensemble_type.catboost.Model <- function(ensemble) {
   .catboost_get_ensemble_type(ensemble)
 }
 
+# Resolve catboost exports without `catboost::` so R CMD check does not
+# require it as a declared dependency (catboost is not on CRAN).
+.catboost_fn <- function(name) {
+  check_package("catboost")
+  getExportedValue("catboost", name)
+}
+
 # Internal worker shared by both CatBoost class names.  Older releases of the
 # catboost R package returned objects of class \code{catboost.CatBoost}; from
 # release 1.2.x the class is \code{catboost.Model}.  Both names are supported.
 .catboost_get_ensemble_type <- function(ensemble) {
   check_package("catboost")
   params <- tryCatch(
-    catboost::catboost.get_model_params(ensemble),
+    .catboost_fn("catboost.get_model_params")(ensemble),
     error = function(e) NULL
   )
   loss <- .catboost_extract_loss(params)
@@ -292,7 +299,7 @@ extract_terminal_nodes.catboost.Model <- function(ensemble, data) {
   # concatenating the rounded raw scores, so two observations sharing the
   # same leaf still receive the same integer identifier.
   for (t in seq_len(n_trees)) {
-    raw <- catboost::catboost.predict(
+    raw <- .catboost_fn("catboost.predict")(
       ensemble, pool,
       prediction_type = "RawFormulaVal",
       ntree_start     = t - 1L,
@@ -403,7 +410,7 @@ get_ensemble_predictions.catboost.Model <- function(ensemble, data, type) {
   check_package("catboost")
   pool      <- .catboost_pool_from_data(ensemble, data)
   pred_type <- if (type == "classification") "Class" else "RawFormulaVal"
-  as.numeric(catboost::catboost.predict(ensemble, pool, prediction_type = pred_type))
+  as.numeric(.catboost_fn("catboost.predict")(ensemble, pool, prediction_type = pred_type))
 }
 
 #' @export
@@ -567,14 +574,14 @@ get_ensemble_predictions.default <- function(ensemble, data, type) {
   if (!is.null(label_col) && label_col %in% colnames(data)) {
     data <- data[, setdiff(colnames(data), label_col), drop = FALSE]
   }
-  catboost::catboost.load_pool(data = data)
+  .catboost_fn("catboost.load_pool")(data = data)
 }
 
 
 # Return the number of trees in a CatBoost model.
 .catboost_n_trees <- function(ensemble) {
   params <- tryCatch(
-    catboost::catboost.get_model_params(ensemble),
+    .catboost_fn("catboost.get_model_params")(ensemble),
     error = function(e) NULL
   )
   n <- .catboost_extract_n_trees(params)
@@ -582,7 +589,7 @@ get_ensemble_predictions.default <- function(ensemble, data, type) {
   if (is.null(n)) {
     # Some catboost versions expose the count via dedicated helpers.
     n <- tryCatch(
-      as.integer(catboost::catboost.get_model_params(ensemble)$boosting_options$iterations),
+      as.integer(.catboost_fn("catboost.get_model_params")(ensemble)$boosting_options$iterations),
       error = function(e) NULL
     )
   }
