@@ -1,6 +1,6 @@
 Package: e2tree
 Title: Explainable Ensemble Trees
-Version: 1.1.0
+Version: 1.2.0
 Authors@R: c(
     person(given = "Massimo",
            family = "Aria",
@@ -19,7 +19,6 @@ URL: https://github.com/massimoaria/e2tree
 BugReports: https://github.com/massimoaria/e2tree/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Imports:
     ape,
     dplyr,
@@ -29,6 +28,7 @@ Imports:
     Matrix,
     partitions,
     purrr,
+    rpart.plot,
     tidyr,
     Rcpp
 LazyData: true
@@ -46,7 +46,6 @@ Suggests:
     ranger,
     xgboost,
     rmarkdown,
-    rpart.plot,
     RSpectra,
     testthat (>= 3.0.0),
     visNetwork
@@ -54,3 +53,4 @@ VignetteBuilder: knitr
 Config/testthat/edition: 3
 Depends:
     R (>= 3.5)
+Config/roxygen2/version: 8.0.0
