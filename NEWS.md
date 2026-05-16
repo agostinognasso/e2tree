@@ -1,6 +1,6 @@
-# e2tree 1.2.0
+# e2tree (development version)
 
-# e2tree (1.2.0)
+# e2tree 1.2.0
 
 ## Robustness fixes (2026-05)
 
