@@ -135,6 +135,15 @@ get_ensemble_type.catboost.Model <- function(ensemble) {
   getExportedValue("catboost", name)
 }
 
+# Optional resolver: return the exported catboost function, or NULL when the
+# installed catboost release does not provide it.  Used to prefer an exact
+# leaf-index API over the prediction-value fallback when one is available,
+# without making the call hard-fail on older releases.
+.catboost_fn_opt <- function(name) {
+  if (!requireNamespace("catboost", quietly = TRUE)) return(NULL)
+  tryCatch(getExportedValue("catboost", name), error = function(e) NULL)
+}
+
 # Internal worker shared by both CatBoost class names.  Older releases of the
 # catboost R package returned objects of class \code{catboost.CatBoost}; from
 # release 1.2.x the class is \code{catboost.Model}.  Both names are supported.
@@ -244,8 +253,7 @@ extract_terminal_nodes.xgb.Booster <- function(ensemble, data) {
 #' @method extract_terminal_nodes lgb.Booster
 extract_terminal_nodes.lgb.Booster <- function(ensemble, data) {
   check_package("lightgbm")
-  feat <- .lgb_feature_names(ensemble)
-  X    <- as.matrix(data[, feat, drop = FALSE])
+  X <- .lgb_design_matrix(ensemble, data)
   as.data.frame(ensemble$predict(X, predleaf = TRUE))
 }
 
@@ -289,15 +297,38 @@ extract_terminal_nodes.catboost.Model <- function(ensemble, data) {
 
   n_trees <- .catboost_n_trees(ensemble)
   n_obs   <- nrow(data)
-  leaf_mat <- matrix(0L, nrow = n_obs, ncol = n_trees)
 
-  # Predict raw score from each individual tree and discretise into leaf IDs.
-  # CatBoost R API does not expose leaf indices directly; raw scores per tree
-  # are unique per leaf and serve as a faithful proxy.  For multi-class
-  # objectives the per-tree prediction is a matrix of shape
-  # (n_obs x n_classes); we collapse it to a single key per observation by
-  # concatenating the rounded raw scores, so two observations sharing the
-  # same leaf still receive the same integer identifier.
+  # Preferred path: when the installed catboost release exposes a leaf-index
+  # query, use the *exact* per-tree terminal-node identifiers.  This is the
+  # faithful object E2Tree needs and avoids the collisions the prediction-value
+  # fallback below can suffer when two distinct leaves of an oblivious tree
+  # happen to carry the same value.
+  leaf_idx_fn <- .catboost_fn_opt("catboost.calc_leaf_indexes")
+  if (!is.null(leaf_idx_fn)) {
+    idx <- tryCatch(leaf_idx_fn(ensemble, pool), error = function(e) NULL)
+    if (!is.null(idx)) {
+      idx <- as.matrix(idx)
+      # calc_leaf_indexes() returns an (n_obs x n_trees) matrix of leaf
+      # indices; orient it defensively before returning.
+      if (nrow(idx) != n_obs && ncol(idx) == n_obs) idx <- t(idx)
+      if (nrow(idx) == n_obs && ncol(idx) == n_trees) {
+        storage.mode(idx) <- "integer"
+        return(as.data.frame(idx))
+      }
+    }
+  }
+
+  # Fallback: the catboost release does not expose leaf indices.  Predict the
+  # raw score from each individual tree and discretise it into a leaf key.
+  # Within a tree the raw score is constant on a leaf, so equal scores group
+  # observations of the same leaf; should two distinct leaves share a value
+  # this only *merges* them, inflating co-occurrence (an upper bound on
+  # proximity) rather than splitting a true leaf.  For multi-class objectives
+  # the per-tree prediction is a matrix of shape (n_obs x n_classes); we
+  # collapse it to a single key per observation by concatenating the rounded
+  # raw scores, so two observations sharing the same leaf still receive the
+  # same integer identifier.
+  leaf_mat <- matrix(0L, nrow = n_obs, ncol = n_trees)
   for (t in seq_len(n_trees)) {
     raw <- .catboost_fn("catboost.predict")(
       ensemble, pool,
@@ -339,54 +370,84 @@ extract_terminal_nodes.default <- function(ensemble, data) {
 # 3.  get_ensemble_predictions()
 # ============================================================================
 
-#' Get Training Predictions from an Ensemble Model
+#' Get Ensemble Predictions for the Training Data
 #'
 #' Returns a numeric vector of length \code{n_obs} with the ensemble's
-#' prediction for every training observation. For models that store
-#' out-of-bag (OOB) predictions (\code{randomForest}, \code{ranger}) the
-#' stored OOB vector is returned; for other models in-sample predictions
-#' are computed from the training data.
+#' prediction for every observation in \code{data}. By default the
+#' \emph{full-ensemble} prediction is returned (every tree votes); for
+#' bagging backends (\code{randomForest}, \code{ranger}) the stored
+#' \emph{out-of-bag} predictions can be requested with \code{oob = TRUE}.
 #'
 #' @param ensemble A trained ensemble model.
 #' @param data The training \code{data.frame} that was used to fit the model.
 #' @param type Character: \code{"classification"} or \code{"regression"}.
+#' @param oob Logical. For bagging backends: if \code{TRUE}, return the stored
+#'   out-of-bag predictions (each observation predicted only by the trees that
+#'   did not see it); if \code{FALSE} (default), return full-ensemble
+#'   predictions on \code{data}. Surrogate \emph{fidelity} should be computed
+#'   against full-ensemble predictions; OOB predictions are noisier (each
+#'   averages roughly one third of the trees) and measure a different
+#'   quantity. Ignored by boosting backends, which have no OOB notion.
 #' @return Numeric vector of length \code{nrow(data)}.
 #' @export
-get_ensemble_predictions <- function(ensemble, data, type) {
+get_ensemble_predictions <- function(ensemble, data, type, oob = FALSE) {
   UseMethod("get_ensemble_predictions")
+}
+
+# Guard shared by the bagging methods: a stored OOB vector refers to the
+# *training* rows, so its length must match nrow(data) or the caller is
+# silently misaligning predictions and observations.
+.check_pred_length <- function(out, data, backend) {
+  if (!is.null(data) && length(out) != nrow(data)) {
+    stop(sprintf(
+      paste0("get_ensemble_predictions(): %d predictions for %d rows of ",
+             "'data' (backend '%s'). With oob = TRUE, 'data' must be the ",
+             "training set the ensemble was fitted on."),
+      length(out), nrow(data), backend), call. = FALSE)
+  }
+  out
 }
 
 #' @export
 #' @method get_ensemble_predictions randomForest
-get_ensemble_predictions.randomForest <- function(ensemble, data, type) {
-  as.numeric(ensemble$predicted)
+get_ensemble_predictions.randomForest <- function(ensemble, data, type, oob = FALSE) {
+  out <- if (isTRUE(oob)) {
+    as.numeric(ensemble$predicted)
+  } else {
+    as.numeric(stats::predict(ensemble, newdata = data))
+  }
+  .check_pred_length(out, data, "randomForest")
 }
 
 #' @export
 #' @method get_ensemble_predictions ranger
-get_ensemble_predictions.ranger <- function(ensemble, data, type) {
-  as.numeric(ensemble$predictions)
+get_ensemble_predictions.ranger <- function(ensemble, data, type, oob = FALSE) {
+  out <- if (isTRUE(oob)) {
+    as.numeric(ensemble$predictions)
+  } else {
+    as.numeric(stats::predict(ensemble, data = data)$predictions)
+  }
+  .check_pred_length(out, data, "ranger")
 }
 
 #' @export
 #' @method get_ensemble_predictions xgb.Booster
-get_ensemble_predictions.xgb.Booster <- function(ensemble, data, type) {
+get_ensemble_predictions.xgb.Booster <- function(ensemble, data, type, oob = FALSE) {
   check_package("xgboost")
   as.numeric(predict(.xgb_strip_wrapper(ensemble), .xgb_dmatrix(ensemble, data)))
 }
 
 #' @export
 #' @method get_ensemble_predictions lgb.Booster
-get_ensemble_predictions.lgb.Booster <- function(ensemble, data, type) {
+get_ensemble_predictions.lgb.Booster <- function(ensemble, data, type, oob = FALSE) {
   check_package("lightgbm")
-  feat <- .lgb_feature_names(ensemble)
-  X <- as.matrix(data[, feat, drop = FALSE])
+  X <- .lgb_design_matrix(ensemble, data)
   as.numeric(ensemble$predict(X))
 }
 
 #' @export
 #' @method get_ensemble_predictions gbm
-get_ensemble_predictions.gbm <- function(ensemble, data, type) {
+get_ensemble_predictions.gbm <- function(ensemble, data, type, oob = FALSE) {
   check_package("gbm")
   as.numeric(
     gbm::predict.gbm(ensemble, newdata = data,
@@ -396,13 +457,13 @@ get_ensemble_predictions.gbm <- function(ensemble, data, type) {
 
 #' @export
 #' @method get_ensemble_predictions catboost.CatBoost
-get_ensemble_predictions.catboost.CatBoost <- function(ensemble, data, type) {
+get_ensemble_predictions.catboost.CatBoost <- function(ensemble, data, type, oob = FALSE) {
   .catboost_get_ensemble_predictions(ensemble, data, type)
 }
 
 #' @export
 #' @method get_ensemble_predictions catboost.Model
-get_ensemble_predictions.catboost.Model <- function(ensemble, data, type) {
+get_ensemble_predictions.catboost.Model <- function(ensemble, data, type, oob = FALSE) {
   .catboost_get_ensemble_predictions(ensemble, data, type)
 }
 
@@ -415,7 +476,7 @@ get_ensemble_predictions.catboost.Model <- function(ensemble, data, type) {
 
 #' @export
 #' @method get_ensemble_predictions default
-get_ensemble_predictions.default <- function(ensemble, data, type) {
+get_ensemble_predictions.default <- function(ensemble, data, type, oob = FALSE) {
   .unsupported_backend("get_ensemble_predictions", ensemble)
 }
 
@@ -501,6 +562,56 @@ get_ensemble_predictions.default <- function(ensemble, data, type) {
   # array_inner is like: "cyl","disp","hp",...
   vals <- gsub('"', "", unlist(strsplit(array_inner, ",")), fixed = TRUE)
   trimws(vals)
+}
+
+# LightGBM sanitises feature names when a Booster is trained: any character
+# outside [A-Za-z0-9_] is replaced with "_" (e.g. a one-hot column
+# "less than 23 years" becomes "less_than_23_years"). The names stored in the
+# model therefore may not match the original column names in `data`, which used
+# to break extract_terminal_nodes()/get_ensemble_predictions() for any user
+# whose predictors contained spaces or special characters.
+.lgb_sanitize_names <- function(x) gsub("[^A-Za-z0-9_]", "_", x)
+
+# Map the model's (possibly sanitised) feature names back onto the columns of
+# `data`, returning the names of the columns to select, in model order.
+.lgb_match_features <- function(feat, data_names) {
+  # Fast path: names already match exactly.
+  if (all(feat %in% data_names)) return(feat)
+  # Fallback: match the model's sanitised names against the sanitised data
+  # names, then recover the original `data` column names.
+  san <- .lgb_sanitize_names(data_names)
+  # Ambiguity: two distinct `data` columns sanitise to the same name that a
+  # model feature needs (e.g. "a b" and "a.b" both -> "a_b"). match() would
+  # silently pick the first; refuse instead.
+  dup_san <- names(which(table(san) > 1L))
+  ambig   <- intersect(feat, dup_san)
+  if (length(ambig)) {
+    clash <- data_names[san %in% ambig]
+    stop(sprintf(
+      "lgb.Booster adapter: data column(s) %s map to the same model feature after sanitising names; rename them to disambiguate.",
+      paste(sQuote(clash), collapse = ", ")),
+      call. = FALSE)
+  }
+  idx <- match(feat, san)
+  if (anyNA(idx)) {
+    missing <- feat[is.na(idx)]
+    stop(sprintf(
+      "lgb.Booster adapter: cannot match model feature(s) %s to columns in `data`, even after sanitising names.",
+      paste(sQuote(missing), collapse = ", ")),
+      call. = FALSE)
+  }
+  data_names[idx]
+}
+
+# Build the numeric design matrix LightGBM expects: columns selected and
+# ordered to the model's features, and named with the model's feature names so
+# that lgb.Booster$predict() does not warn/error on a name mismatch.
+.lgb_design_matrix <- function(ensemble, data) {
+  feat <- .lgb_feature_names(ensemble)
+  cols <- .lgb_match_features(feat, names(data))
+  X <- as.matrix(data[, cols, drop = FALSE])
+  colnames(X) <- feat
+  X
 }
 
 

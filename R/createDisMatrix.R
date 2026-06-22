@@ -3,9 +3,14 @@ utils::globalVariables(c("resp", "W", "data_XGB", "i"))
 #' Create a Dissimilarity Matrix from an Ensemble Model
 #'
 #' The function createDisMatrix creates a dissimilarity matrix among
-#' observations from an ensemble tree. This optimized version is designed
-#' for large datasets (50K-500K observations) with improved memory management
-#' and chunking capabilities.
+#' observations from an ensemble tree, with chunked computation and batched
+#' aggregation to limit memory peaks.
+#'
+#' Note that the returned matrix is \emph{dense}, so memory grows
+#' quadratically with the number of observations (\eqn{n^2 \times 8} bytes:
+#' about 0.8 GB at \eqn{n = 10{,}000}, 20 GB at \eqn{n = 50{,}000}). The
+#' chunking options reduce the computation's peak overhead, not the size of
+#' the result. For larger datasets, work on a subsample.
 #'
 #' @param ensemble is an ensemble tree object
 #' @param data is a data frame containing the variables in the model. It is the

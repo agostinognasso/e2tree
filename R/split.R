@@ -1,8 +1,11 @@
 #X is a data frame of predictors (numerical, ordered or factor classes)
 #max_cat: maximum number of categories for exhaustive binary partitioning
 #         variables with more categories fall back to ordinal (frequency-based) splits
+#max_thresholds: cap on candidate thresholds per numeric variable (quantile
+#         binning); keeps S at O(n * max_thresholds) per feature instead of
+#         O(n^2) on continuous data
 
-split <- function(X, max_cat = 10){
+split <- function(X, max_cat = 10, max_thresholds = 256L){
   # check column class and generate splits for each column
 
   xLabels <- names(X)
@@ -20,7 +23,7 @@ split <- function(X, max_cat = 10){
     if (type %in% c("character","factor")){
       S <- catSplit(x, max_cat = max_cat)  # split for categorical variables
     } else if (type %in% c("numeric","ordered","integer")){
-      S <- ordSplit(x)  # split for numeric or ordered variables
+      S <- ordSplit(x, max_thresholds = max_thresholds)  # split for numeric or ordered variables
     }
     return(S)
   })
@@ -109,12 +112,27 @@ catSplit <- function(x, max_cat = 10){
 
 
 # Splitting of ordered variables
-ordSplit <- function(x){
+# max_thresholds: when a variable has more unique values than this cap, the
+# candidate thresholds are reduced to (at most) max_thresholds empirical
+# quantiles (type = 1, i.e. observed values). On continuous predictors this
+# bounds the split matrix at n x max_thresholds per feature instead of n x n,
+# with negligible loss in split quality (LightGBM-style histogram binning).
+ordSplit <- function(x, max_thresholds = 256L){
 
   # take unique values of X and create split list and labels
   values <- sort(unique(x))
   if (length(values)>1){
     values <- values[-length(values)]
+
+    if (is.finite(max_thresholds) && length(values) > max_thresholds) {
+      qs <- stats::quantile(x,
+                            probs = seq_len(max_thresholds) / (max_thresholds + 1),
+                            type = 1, names = FALSE)
+      qs <- sort(unique(qs))
+      qs <- qs[qs < max(x)]          # a threshold at max(x) is a void split
+      if (length(qs) > 0) values <- qs
+    }
+
     Sxlabel <- paste("<=",values,sep="")
 
     # build up the splits — vectorized with outer()

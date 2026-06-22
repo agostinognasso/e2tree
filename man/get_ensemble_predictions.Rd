@@ -2,9 +2,9 @@
 % Please edit documentation in R/adapters.R
 \name{get_ensemble_predictions}
 \alias{get_ensemble_predictions}
-\title{Get Training Predictions from an Ensemble Model}
+\title{Get Ensemble Predictions for the Training Data}
 \usage{
-get_ensemble_predictions(ensemble, data, type)
+get_ensemble_predictions(ensemble, data, type, oob = FALSE)
 }
 \arguments{
 \item{ensemble}{A trained ensemble model.}
@@ -12,14 +12,22 @@ get_ensemble_predictions(ensemble, data, type)
 \item{data}{The training \code{data.frame} that was used to fit the model.}
 
 \item{type}{Character: \code{"classification"} or \code{"regression"}.}
+
+\item{oob}{Logical. For bagging backends: if \code{TRUE}, return the stored
+out-of-bag predictions (each observation predicted only by the trees that
+did not see it); if \code{FALSE} (default), return full-ensemble
+predictions on \code{data}. Surrogate \emph{fidelity} should be computed
+against full-ensemble predictions; OOB predictions are noisier (each
+averages roughly one third of the trees) and measure a different
+quantity. Ignored by boosting backends, which have no OOB notion.}
 }
 \value{
 Numeric vector of length \code{nrow(data)}.
 }
 \description{
 Returns a numeric vector of length \code{n_obs} with the ensemble's
-prediction for every training observation. For models that store
-out-of-bag (OOB) predictions (\code{randomForest}, \code{ranger}) the
-stored OOB vector is returned; for other models in-sample predictions
-are computed from the training data.
+prediction for every observation in \code{data}. By default the
+\emph{full-ensemble} prediction is returned (every tree votes); for
+bagging backends (\code{randomForest}, \code{ranger}) the stored
+\emph{out-of-bag} predictions can be requested with \code{oob = TRUE}.
 }

@@ -296,17 +296,11 @@ predict.e2tree <- function(object, newdata, target = NULL, ...) {
     }, numeric(1))
     names(node_sd) <- as.character(terminal$node)
 
-    # Build lookup: prediction value -> node number (handles duplicate preds)
-    pred_to_node <- setNames(as.character(terminal$node), as.character(terminal$pred))
-
-    # Map each prediction to its node's sd via pred value
-    # Use match on prediction values to find the correct terminal node
+    # Map each observation to its node's sd via the terminal node id returned
+    # by the traversal (matching on predicted values is ambiguous when two
+    # leaves share the same prediction).
     fit_vals <- as.numeric(result$fit)
-    sd_vec <- vapply(fit_vals, function(v) {
-      idx <- which(abs(as.numeric(terminal$pred) - v) < 1e-10)
-      if (length(idx) == 0) return(NA_real_)
-      node_sd[idx[1]]
-    }, numeric(1))
+    sd_vec <- unname(node_sd[as.character(result$node)])
 
     return(data.frame(
       fit = fit_vals,

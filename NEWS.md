@@ -1,5 +1,152 @@
 # e2tree (development version)
 
+## Panel e2tree: new capabilities
+
+- **`target = "pooled"`** in `panel_e2tree()`: explains a *given* pooled
+  ensemble (user-supplied via `pooled_ensemble`, or fitted internally) by
+  decomposing the model's full-ensemble predictions into between/within
+  components and explaining each; all metrics then quantify fidelity to the
+  given model's behaviour, with `vs_outcome` reporting the same metrics
+  against the observed outcome.
+- **`within = "twoway"`** in `panel_e2tree()`: two-way demeaning. Common
+  period effects `tau_t` (period means of the unit-demeaned values, an exact
+  row-wise identity also in unbalanced panels) are removed from the within
+  representation and reported in `time_means`; the reconstruction becomes
+  `between + tau_t + within` and `predict()` consumes the stored period means.
+- **`na.action = "unit.available"`**: unit means computed per variable on all
+  available observations (less biased in unbalanced panels with missingness);
+  fitting still uses complete rows.
+- **`min_periods`** + singleton diagnostics: units observed fewer than
+  `min_periods` times are excluded and reported; single-observation units
+  (whose within rows are identically zero) are counted and flagged.
+- The returned object now includes the explanandum's **ICC**, the honest
+  **`r2_panel`** (`1 - SSE/SST`) as headline metric and
+  **`outcome_var_recovered`** (squared correlation; `fidelity_panel` is kept
+  as a deprecated alias), `.row`/time columns in `predictions` for
+  re-alignment after complete-casing, and slimmer components by default
+  (`keep_D = FALSE`, `keep_data = FALSE`).
+- **`dis_args`** pass-through to `createDisMatrix()` (e.g. `parallel`,
+  `chunk_size`); engine arguments managed internally (`ntree`, `num.trees`,
+  `importance`, `formula`, `data`) are rejected from `...` with a clear error.
+
+## Fidelity semantics and performance
+
+- **`get_ensemble_predictions(..., oob = FALSE)`**: full-ensemble predictions
+  are now the default for fidelity computations; the stored out-of-bag
+  predictions of bagging backends remain available with `oob = TRUE` (used
+  internally by `e2tree()` for the historical node-level MSE). A length check
+  catches silent misalignment between predictions and data.
+- **Quantile binning of split thresholds**: numeric predictors with more
+  unique values than `max_thresholds` (default 256, configurable per call via
+  the e2tree `setting`) contribute at most `max_thresholds` quantile-based
+  candidate splits, bounding the split matrix at `O(n * max_thresholds)` per
+  feature instead of `O(n^2)` on continuous data (LightGBM-style histogram
+  binning).
+- `predict.e2tree()` (regression) now attaches node-level `sd` via the
+  terminal-node id returned by the traversal, fixing wrong `sd` values when
+  two leaves share the same prediction; `ePredTree()` results gain a `node`
+  column.
+- `Wtest()` respects its `p.value` argument (was hard-coded to 0.05).
+- `createDisMatrix()` documentation now states the dense-output memory limits
+  honestly.
+
+## Panel (longitudinal) data
+
+- **`panel_e2tree()`**: explains a tree ensemble fitted to **panel**
+  (unit × time) data by decomposing the *feature representation* à la Mundlak
+  (1978) into a **between** (unit-mean, one row per unit) and a **within**
+  (unit-demeaned deviation) component, and growing a separate `e2tree` surrogate
+  for each. The panel reconstruction is additive,
+  `ŷ_it = between(mean of unit i) + within(deviation of i,t)`. On panel data with
+  high intraclass correlation a single pooled e2tree conflates the two sources
+  and the within signal is crowded out; decomposing the input and explaining
+  each part separately separates them (on a known-roles synthetic panel the
+  between tree recovers the unit driver, the within tree the time-varying driver,
+  and the decomposed panel fidelity exceeds the pooled surrogate's). Routed
+  through the adapter layer (`createDisMatrix()`, `e2tree()`, `vimp()`,
+  `get_ensemble_predictions()`), so it inherits the supported ensemble backends;
+  `engine` fits the per-representation ensembles internally (`ranger` default).
+  Returns an `e2panel` object with `print`, `summary` (fidelity + decomposed
+  between/within importance), `plot` (both surrogates), and `predict` methods.
+  Stays interpretive: per-component quality is fidelity to the ensemble, and the
+  panel figure is the share of *observed* outcome variance recovered by the
+  decomposition (a descriptive diagnostic, not a predictive claim). Regression
+  outcomes with numeric predictors; classification of the within deviation is an
+  open direction.
+- **`panel_health`** dataset: a simulated country × year panel (30 countries,
+  2004–2019) of life-expectancy determinants, with interpretable between
+  (`gdp_pc`, `health_exp`) and within (`immunization`, `undernourish`) drivers
+  and high ICC (≈ 0.96). Used by the `panel_e2tree()` examples and the
+  *"Panel e2tree"* vignette. Generated by `data-raw/panel_health.R`.
+
+## Local explainability layer
+
+e2tree is **interpretive, not predictive**: it reconstructs the grouping
+geometry a trained ensemble induces (via the proximity matrix `D`) and its
+quality is measured as *fidelity* to that ensemble, never as predictive
+accuracy. This release adds a per-node / per-observation layer that brings the
+same lens down to the local scale. All functions are backend-agnostic
+(verified on randomForest, ranger, xgboost and gbm).
+
+- **`localLoI()`**: disaggregates the global Level of Information
+  (`loi()` / nLoI) into per-node and per-observation fidelity, so one can see
+  *where* the reconstruction is reliable. `mean(obs$loi)` reproduces `nLoI`
+  exactly.
+- **`eContribution()`**: per-instance Saabas-style attribution of the
+  reconstructed value, exactly additive (per class for classification), framed
+  as a decomposition of the reconstruction rather than of a prediction.
+- **`eNeighbors()`**: case-based explanation returning the nearest training
+  cases by the ensemble's own leaf co-occurrence proximity, plus leaf
+  prototypes. Ships with `plot.e2neighbors()`.
+- **`eHeterogeneity()`**: descriptive per-region outcome dispersion (entropy /
+  prediction set for classification; central band / sd for regression).
+- **`nodeStats()`**: full profile of any node, terminal or internal — metadata
+  and decision rule, per-predictor node-vs-rest statistics (Cohen's d for
+  numeric, Cramér's V for categorical) and the response distribution, with
+  `print` (profile card) and `plot` (node-vs-global distributions) methods.
+- **`plotNodeComparison()`**: side-by-side comparison of two nodes on the
+  predictors that separate them most.
+
+## Advanced local explanation
+
+Three functions extend the local layer beyond point-estimate description, while
+staying interpretive (fidelity to the ensemble, never predictive accuracy):
+
+- **`eCounterfactual()`**: proximity-native contrastive explanation. Reports the
+  smallest feature change that would move an instance into a different E2Tree
+  region, and -- crucially -- **verifies that change against the ensemble's own
+  grouping geometry** (leaf co-occurrence proximity): `validated` is `TRUE` only
+  when the forest actually regroups the counterfactual nearer the target region.
+  This distinguishes it from surrogate-only counterfactuals, which can flip the
+  approximating tree without convincing the ensemble. Handles classification
+  (different reconstructed class) and regression (opposite side of the global
+  median); ships with `print` and `plot` methods.
+- **`eStability()`**: confidence and stability of a local explanation via
+  bootstrap over the ensemble's trees. Resampling the trees turns each local
+  quantity into a distribution, yielding a per-instance explanation `confidence`,
+  a `neighbor_stability` score (top-k retention of `eNeighbors`), and an interval
+  on the reconstructed grouping outcome. Fills the usual XAI gap of point
+  estimates with no uncertainty.
+- **`explain()`**: a single per-instance entry point that composes the whole
+  local layer -- routing, additive attribution, ensemble neighbours, region
+  fidelity (`localLoI`), outcome dispersion (`eHeterogeneity`), and, on request,
+  the counterfactual and stability above -- into one coherent narrative object
+  with `print` and `plot` methods.
+
+## Robustness fixes
+
+- **LightGBM feature-name sanitisation**: LightGBM rewrites any character
+  outside `[A-Za-z0-9_]` in feature names to `_` when a Booster is trained
+  (e.g. a one-hot column `"less than 23 years"` becomes
+  `"less_than_23_years"`). The names stored in the model then no longer matched
+  the original columns of `data`, so `extract_terminal_nodes()` and
+  `get_ensemble_predictions()` failed for any LightGBM model whose predictors
+  contained spaces or special characters. The adapter now resolves the model's
+  feature names against `data` (exact match first, sanitised match as a
+  fallback), reorders and renames the design matrix to what the Booster
+  expects, and raises a clear error if a feature cannot be matched or if two
+  columns become ambiguous after sanitising.
+
 # e2tree 1.2.0
 
 ## Robustness fixes (2026-05)

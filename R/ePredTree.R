@@ -80,11 +80,14 @@ ePredTree <- function(fit, data, target="1") {
   # Determine if the model is classification or regression
   is_classification <- !is.numeric(tree$pred)
 
-  # Initialize the prediction dataframe (use correct type for fit column)
+  # Initialize the prediction dataframe (use correct type for fit column).
+  # `node` records the terminal node each observation lands in, so callers
+  # can attach node-level statistics without matching on predicted values
+  # (ambiguous when two leaves share the same prediction).
   if (is_classification) {
-    pred <- data.frame(fit = rep(NA_character_, n), accuracy = NA_real_, score = NA_real_, row.names = 1:n)
+    pred <- data.frame(fit = rep(NA_character_, n), accuracy = NA_real_, score = NA_real_, node = NA_integer_, row.names = 1:n)
   } else {
-    pred <- data.frame(fit = rep(NA_real_, n), accuracy = NA_real_, score = NA_real_, row.names = 1:n)
+    pred <- data.frame(fit = rep(NA_real_, n), accuracy = NA_real_, score = NA_real_, node = NA_integer_, row.names = 1:n)
   }
 
   # ---- Tree-traversal prediction (replaces eval/parse) ----
@@ -130,7 +133,8 @@ ePredTree <- function(fit, data, target="1") {
     obs_idx <- which(node_assignment == nd)
     if (length(obs_idx) == 0) next
 
-    pred$fit[obs_idx] <- terminal$pred[i]
+    pred$fit[obs_idx]  <- terminal$pred[i]
+    pred$node[obs_idx] <- as.integer(nd)
 
     if (is_classification) {
       prob_val <- as.numeric(terminal$prob[i])

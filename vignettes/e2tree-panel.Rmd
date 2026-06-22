@@ -1,0 +1,228 @@
+---
+title: "Panel e2tree: Explaining an Ensemble on Longitudinal Data (Between / Within)"
+author: "Massimo Aria, Agostino Gnasso"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Panel e2tree: Explaining an Ensemble on Longitudinal Data (Between / Within)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+run <- requireNamespace("ranger", quietly = TRUE)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  eval = run
+)
+```
+
+## Panel data has two sources of variation
+
+When the data are **panel** (or longitudinal) --- the same units observed over
+time, `unit x time` in long format --- the outcome moves for two distinct
+reasons:
+
+- **between** units: some units simply sit at a higher or lower level than
+  others (differences between unit averages);
+- **within** units: the outcome changes over time *inside* a unit (deviations
+  from that unit's own average).
+
+These are different questions. *What makes Sweden's life expectancy higher than
+Romania's?* is a between question. *What moved a given country's life expectancy
+across years?* is a within question. A single explanation that mixes the two
+answers neither well.
+
+`panel_e2tree()` keeps them separate. Following the decomposition of
+Mundlak (1978), it splits the **feature representation** into a between part
+(unit means) and a within part (unit-demeaned deviations), grows a *separate*
+[`e2tree`](e2tree-introduction.html) surrogate for each, and reconstructs the
+panel additively:
+
+$$
+\hat y_{it} \;=\; \underbrace{\text{between}(\bar x_i)}_{\text{unit level}}
+\;+\; \underbrace{\text{within}(x_{it} - \bar x_i)}_{\text{movement over time}} .
+$$
+
+As everywhere in **e2tree**, this is *interpretive, not predictive*: each
+surrogate's quality is its **fidelity** to the ensemble it explains
+($\mathrm{cor}(\text{e2tree}, \text{ensemble})^2$), and the panel figure is the
+share of the *observed* outcome variance recovered by the decomposition --- a
+descriptive diagnostic, never a predictive claim.
+
+## Why a single surrogate is not enough
+
+On panel data with high intraclass correlation (ICC) --- where the between
+variance dominates --- a single *pooled* e2tree conflates the two sources: the
+between variance crowds out the within signal and, with a handful of splits, the
+tree cannot encode the unit levels, so fidelity collapses. Several single-model
+shortcuts were tried and discarded:
+
+| Approach | Outcome | Why it fails |
+|---|---|---|
+| pooled e2tree on raw features | low fidelity | conflates between / within |
+| PERMANOVA decomposition of a pooled proximity | does not track the outcome ICC | proximity reflects the *feature* partition, not the outcome variance |
+| single e2tree on Mundlak-augmented features `[x_bw, x_wn]` | within barely splits | between dominance crowds out within |
+| **two-representation decomposition** | **high fidelity** | separates the two sources |
+
+The lesson: the decomposition must act on the **input** (the feature
+representation) and must *separate* the data, not merely augment it. That is
+what `panel_e2tree()` does.
+
+## An example panel: `panel_health`
+
+The package ships a **simulated** country-by-year panel of life-expectancy
+determinants, `panel_health` (30 synthetic countries, 2004--2019, 480 rows). It
+is built so the two sources of variation are interpretable: some predictors
+mostly distinguish countries (**between**: `gdp_pc`, `health_exp`, `schooling`),
+while others mostly move the outcome over time within a country (**within**:
+`immunization` catch-up, `undernourish` shocks). The intraclass correlation of
+`life_expectancy` is high ($\approx 0.96$) --- exactly the regime where a single
+pooled surrogate is overwhelmed by the between variance.
+
+```{r build}
+library(e2tree)
+
+data(panel_health)
+head(panel_health)
+
+# intraclass correlation of the outcome (share of between variance)
+mu  <- tapply(panel_health$life_expectancy, panel_health$country, mean)
+icc <- var(mu[as.character(panel_health$country)]) / var(panel_health$life_expectancy)
+round(icc, 2)
+```
+
+## Fitting the decomposition
+
+The interface mirrors the rest of the package: a `formula`, the `data`, and the
+name of the `unit` column. The per-representation ensembles are fitted
+internally (`engine = "ranger"` by default, routed through the same adapter
+layer as the rest of e2tree, so any supported backend works); a `time` column
+can be passed and is reserved for future lag extensions.
+
+```{r fit}
+m <- panel_e2tree(
+  life_expectancy ~ gdp_pc + health_exp + schooling +
+    immunization + sanitation + undernourish,
+  data = panel_health, unit = "country", time = "year",
+  engine = "ranger", ntree = 400, seed = 7)
+print(m)
+```
+
+The `print` method reports the three fidelities at a glance: the **between**
+surrogate and the **within** surrogate against their respective ensembles, and
+the **panel** reconstruction against the observed outcome. Note which variables
+each tree splits on --- the between tree picks up the cross-country level drivers
+(`gdp_pc`, `health_exp`), while the within tree picks up what moves a country
+over time, led by `immunization`.
+
+## Reading the decomposition
+
+`summary()` expands the report: the panel shape (balanced or not), the
+fidelities, the **decomposed variable importance** (between vs within), and any
+features dropped from a representation. Dropping is automatic and meaningful: a
+time-invariant feature becomes constant after within-demeaning and is removed
+from the *within* tree, while a feature with no between-unit variation is removed
+from the *between* tree. (In `panel_health` every predictor carries both kinds
+of variation, so none is dropped.)
+
+```{r summary}
+summary(m)
+```
+
+The decomposed importance is the payoff: it tells you *separately* which
+features explain where countries stand (income and health spending, between) and
+which explain how a country moves over time (immunization gains, undernourishment
+shocks, within) --- a distinction a pooled importance ranking cannot draw.
+
+## The two trees
+
+Each component is an ordinary `e2tree`, so it plots with the usual
+`plot_e2tree()`. `plot.e2panel()` draws either or both.
+
+```{r plot-between, fig.height = 4.5}
+plot(m, component = "between")
+```
+
+```{r plot-within, fig.height = 4.5}
+plot(m, component = "within")
+```
+
+## The necessity argument, empirically
+
+Does the decomposition actually buy fidelity over a single pooled surrogate? We
+fit one e2tree on the raw features and reconstruct the observed outcome, then
+compare.
+
+```{r necessity}
+f <- life_expectancy ~ gdp_pc + health_exp + schooling +
+  immunization + sanitation + undernourish
+
+ens_pool  <- ranger::ranger(f, data = panel_health,
+                            num.trees = 400, importance = "permutation")
+D_pool    <- createDisMatrix(ens_pool, data = panel_health, label = "life_expectancy",
+                             parallel = list(active = FALSE, no_cores = 1))
+tree_pool <- e2tree(f, panel_health, D_pool, ens_pool,
+                    setting = list(impTotal = 0.1, maxDec = 1e-6, n = 2, level = 5))
+
+pooled_fit      <- as.numeric(predict(tree_pool, newdata = panel_health)$fit)
+pooled_fidelity <- cor(pooled_fit, panel_health$life_expectancy)^2
+
+c(pooled = pooled_fidelity, decomposed_panel = m$fidelity_panel)
+```
+
+The decomposed reconstruction matches or exceeds the pooled surrogate. The same
+pattern holds, more sharply, in the published life-expectancy application
+(137--144 real countries, 2000--2024, ICC $\approx 0.86$): pooled fidelity
+$\approx 0.39$ versus a decomposed panel fidelity of $0.82$--$0.83$ (between
+$0.93$, within $0.66$ with the full feature set). The higher the ICC, the more a
+single surrogate is overwhelmed by the between variance, and the more the
+decomposition is needed.
+
+## Prediction on new observations
+
+`predict()` reconstructs the additive explanation for new rows: it maps the
+between prediction by unit and runs the within tree on the deviation from the
+*training* unit mean. The output separates the two contributions.
+
+```{r predict}
+newrows <- panel_health[c(1, 17, 33), ]   # one row from each of three countries
+predict(m, newdata = newrows)
+```
+
+For a unit unseen in training the between prediction falls back to the mean over
+training units and the within contribution is set to zero (with a warning),
+since the unit's reference level is unknown.
+
+## Diagnostics and scope
+
+**Within signal.** The within tree can only be as informative as the *within
+variation* of the features. With few time-varying predictors it degenerates;
+`panel_e2tree()` reports the mean within-variance share of the features
+(`summary()`) and warns when it is low. In the life-expectancy study, moving
+from 8 to 11 features --- adding the ILR coordinates of the financing mix ---
+lifted the within fidelity from $\approx 0.01$ to $0.66$.
+
+**Unbalanced panels.** Missing rows are handled (complete cases per the selected
+columns; unit means computed with `na.rm = TRUE`); `summary()` flags whether the
+panel is balanced.
+
+**Regression only (for now).** This first version targets numeric outcomes with
+numeric predictors. The between component generalises naturally to
+classification (unit proportions), but a "within deviation" of a categorical
+target is an open methodological direction; a factor outcome raises an explicit
+error. Future work also includes within trees with *lags* and native
+between/within significance tests.
+
+## References
+
+- Mundlak, Y. (1978). On the pooling of time series and cross section data.
+  *Econometrica*, 46(1), 69--85.
+- Aria, M., Gnasso, A., Iorio, C., & Pandolfo, G. (2024). Explainable
+  ensemble trees. *Computational Statistics*, 39(1), 3--19.
+- Aria, M., Gnasso, A., Iorio, C., & Fokkema, M. (2026). Extending
+  Explainable Ensemble Trees to Regression Contexts. *Applied Stochastic
+  Models in Business and Industry*, 42(1), e70064.

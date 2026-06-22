@@ -198,7 +198,8 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
   
   ## Generate the split matrix S from the original predictor matrix X
   max_cat <- if (!is.null(setting$max_cat)) setting$max_cat else 10
-  res <- split(X, max_cat = max_cat)
+  max_thresholds <- if (!is.null(setting$max_thresholds)) setting$max_thresholds else 256L
+  res <- split(X, max_cat = max_cat, max_thresholds = max_thresholds)
   S <- res$S
   l <- res$lab
   rm(res)
@@ -224,9 +225,13 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
   
   N <- NULL
 
-  # Pre-compute training predictions once (used for regression MSE per node)
+  # Pre-compute training predictions once (used for regression MSE per node).
+  # oob = TRUE preserves the historical behaviour of the node-level MSE
+  # (out-of-bag for bagging backends); surrogate *fidelity* should instead be
+  # computed against full-ensemble predictions (oob = FALSE, the default of
+  # get_ensemble_predictions()).
   ensemble_preds <- if (tolower(type) == "regression") {
-    get_ensemble_predictions(ensemble, data, tolower(type))
+    get_ensemble_predictions(ensemble, data, tolower(type), oob = TRUE)
   } else {
     NULL
   }
@@ -290,26 +295,39 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
       
     } else{
       imp<- eImpurity(D,index,S)
-      s <- which.min(imp)
-      v <- gsub(" <=.*| %in%.*","",names(s))
-      s2 <- which.min(imp[!(l %in% v)])
-      
-      # max decrease of impurity
-      decImp <- results$impTotal-imp[s]
-      decImpSur <- results$impTotal-imp[s2]
-      
-      #check for max impurity stopping rule
-      if (decImp<=setting$maxDec){
-        #info[[t]] <- list(imp=NA,decImp=NA, split=NA, splitLabel=NA, terminal=TRUE, parent= floor(t/2), children=NA, impTotal=results$impTotal, obs=index, path=NA)
-        #info$parent[t] <- floor(t/2)
+
+      # Candidate selection with Mann-Whitney fallback: the impurity-best split
+      # can isolate a tiny outlier group whose response distribution does not
+      # differ significantly; terminating the node outright (the historical
+      # behaviour) lets a single pathological candidate kill the whole branch.
+      # Instead, walk the candidates in increasing impurity order and take the
+      # first that (a) clears maxDec and (b) passes the Wilcoxon test; bounded
+      # at 10 attempts to keep the cost negligible.
+      ord <- order(imp)
+      ord <- ord[is.finite(imp[ord])]
+      chosen <- NA_integer_
+      for (k in seq_len(min(length(ord), 10L))) {
+        cand <- ord[k]
+        if ((results$impTotal - imp[cand]) <= setting$maxDec) break  # ordered: later ones cannot pass
+        if (suppressWarnings(Wtest(Y=response[index], X=S[index,cand], p.value=0.05, type = type))){
+          chosen <- cand
+          break
+        }
+      }
+
+      if (is.na(chosen)){
         info$terminal[t] <- TRUE
-        #info$impTotal[t] <- results$impTotal
         info$obs[t] <- list(index)
         info$path[t] <- paths(info,t)
-      } else if (suppressWarnings(Wtest(Y=response[index], X=S[index,s], p.value=0.05, type = type))){
-        # Stopping Rule with Mann-Whitney for regression case
-        # if it is regression, check that the hypothesis that the two distributions in tL and tR are equal is rejected
-        
+      } else {
+        s <- structure(chosen, names = colnames(S)[chosen])
+        v <- gsub(" <=.*| %in%.*","",names(s))
+        s2 <- which.min(imp[!(l %in% v)])
+
+        # max decrease of impurity
+        decImp <- results$impTotal-imp[s]
+        decImpSur <- results$impTotal-imp[s2]
+
         info$impChildren[t] <- as.numeric(imp[s])
         info$decImp[t] <- as.numeric(decImp)
         info$decImpSur[t] <- as.numeric(decImpSur)
@@ -327,11 +345,6 @@ e2tree <- function(formula, data, D, ensemble, setting=list(impTotal=0.1, maxDec
         
         nodes[index] <- (nodes[index]*2+1)-S[index,s]
         nterm <- c(nterm, sort(unique(nodes[index]), decreasing=T))
-      }else{
-        info$terminal[t] <- TRUE
-        #info$impTotal[t] <- results$impTotal
-        info$obs[t] <- list(index)
-        info$path[t] <- paths(info,t)
       }
     }
     
@@ -510,7 +523,7 @@ variance <- e2_variance
 Wtest = function(Y, X, type, p.value=0.05){
   switch (type,
           "classification" = {resp=TRUE},
-          "regression" = {resp <- wilcox.test(Y ~ X)$p.value <= 0.05}
+          "regression" = {resp <- wilcox.test(Y ~ X)$p.value <= p.value}
   )
   return(resp)
 }

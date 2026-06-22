@@ -1,0 +1,52 @@
+#' Simulated Country-Year Panel of Life-Expectancy Determinants
+#'
+#' A \strong{simulated} balanced panel of 30 (synthetic) countries observed over
+#' 16 years (2004--2019), built to illustrate \code{\link{panel_e2tree}}. The
+#' data-generating process separates the two sources of variation on purpose:
+#' some predictors mostly distinguish countries (\emph{between}: development
+#' level, GDP per capita, health expenditure, schooling), while others mostly
+#' move the outcome over time within a country (\emph{within}: immunization
+#' catch-up, undernourishment shocks, and a common medical-progress trend). The
+#' intraclass correlation of \code{life_expectancy} is high
+#' (\eqn{\approx 0.96}), so a single pooled surrogate is dominated by the
+#' between variance --- the regime where the between/within decomposition pays
+#' off.
+#'
+#' No real country is represented. The generating script is in
+#' \code{data-raw/panel_health.R}.
+#'
+#' @format A data frame with 480 rows (30 countries \eqn{\times} 16 years) and
+#'   9 columns:
+#' \describe{
+#'   \item{country}{Country identifier (factor, \code{"C01"}--\code{"C30"}); the
+#'     panel \code{unit}.}
+#'   \item{year}{Calendar year (integer, 2004--2019).}
+#'   \item{gdp_pc}{GDP per capita (current USD). \emph{Between}-dominant.}
+#'   \item{health_exp}{Health expenditure (percent of GDP). \emph{Between}-dominant.}
+#'   \item{schooling}{Mean years of schooling. \emph{Between}-dominant, slow
+#'     upward drift.}
+#'   \item{immunization}{Immunization coverage (percent of children). Strong
+#'     \emph{within} signal (catch-up over time).}
+#'   \item{sanitation}{Population with basic sanitation (percent). \emph{Between}
+#'     plus mild within.}
+#'   \item{undernourish}{Prevalence of undernourishment (percent). Carries
+#'     \emph{within} shocks (crisis spikes).}
+#'   \item{life_expectancy}{Life expectancy at birth (years); the numeric
+#'     outcome.}
+#' }
+#'
+#' @source Simulated; see \code{data-raw/panel_health.R} in the package sources.
+#'
+#' @examples
+#' \donttest{
+#' data(panel_health)
+#' if (requireNamespace("ranger", quietly = TRUE)) {
+#'   m <- panel_e2tree(
+#'     life_expectancy ~ gdp_pc + health_exp + schooling +
+#'       immunization + sanitation + undernourish,
+#'     data = panel_health, unit = "country", time = "year",
+#'     engine = "ranger", ntree = 300)
+#'   print(m)
+#' }
+#' }
+"panel_health"

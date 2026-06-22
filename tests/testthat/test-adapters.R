@@ -277,3 +277,40 @@ test_that("createDisMatrix — randomForest regression still works", {
   expect_true(is.matrix(D))
   expect_equal(dim(D), c(nrow(tr), nrow(tr)))
 })
+
+# ===========================================================================
+# Tests: LightGBM feature-name sanitisation matcher (pure R, no lightgbm dep)
+# ===========================================================================
+
+test_that(".lgb_match_features — exact match returns names unchanged", {
+  feat <- c("age", "income", "balance")
+  expect_equal(
+    e2tree:::.lgb_match_features(feat, c("balance", "age", "income")),
+    feat
+  )
+})
+
+test_that(".lgb_match_features — recovers original names after sanitisation", {
+  # LightGBM stores sanitised names; `data` keeps the originals with spaces.
+  data_names <- c("less than 23 years", "income (k)", "balance")
+  feat       <- c("less_than_23_years", "income__k_", "balance")
+  expect_equal(
+    e2tree:::.lgb_match_features(feat, data_names),
+    data_names
+  )
+})
+
+test_that(".lgb_match_features — errors clearly on an unmatchable feature", {
+  expect_error(
+    e2tree:::.lgb_match_features(c("age", "ghost"), c("age", "income")),
+    "cannot match model feature"
+  )
+})
+
+test_that(".lgb_match_features — errors when names collide after sanitising", {
+  # "a b" and "a.b" both sanitise to "a_b" -> ambiguous.
+  expect_error(
+    e2tree:::.lgb_match_features(c("a_b"), c("a b", "a.b")),
+    "map to the same model feature"
+  )
+})

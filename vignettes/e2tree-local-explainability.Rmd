@@ -1,0 +1,258 @@
+---
+title: "Local Explainability with e2tree: Reading the Ensemble Through the Tree"
+author: "Massimo Aria, Agostino Gnasso"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Local Explainability with e2tree: Reading the Ensemble Through the Tree}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+run <- requireNamespace("randomForest", quietly = TRUE)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5,
+  eval = run
+)
+```
+
+## Why a local layer?
+
+The core of **e2tree** is a *global* surrogate: a single tree built from the
+ensemble's dissimilarity matrix `D`, where `D[i,j]` measures how often two
+observations end up in *different* terminal nodes across the ensemble. The
+tree reproduces the ensemble's partitioning geometry in a transparent form,
+and `loi()` quantifies how faithfully it does so.
+
+This vignette covers the *local* layer: a set of functions that use the
+tree as a **reading lens onto the ensemble**, answering questions about a
+single observation, a single node, or a single prediction. All of them are
+*native* to e2tree --- they exploit the tree partition and the ensemble
+proximity that defines `D`, rather than re-implementing model-agnostic tools.
+
+| Function | Question it answers |
+|---|---|
+| `localLoI()` | *Where* can I trust the tree? (per-node and per-observation fidelity) |
+| `eContribution()` | *Why* did this observation get this prediction? (per-instance attribution) |
+| `eNeighbors()` | *Which known cases* is this observation like, in the ensemble's eyes? |
+| `eHeterogeneity()` | *How decisive* is the ensemble in this region? (outcome dispersion per leaf) |
+| `nodeStats()` | *Who is in this node and what makes it distinctive?* (full per-node profile, any node) |
+| `plotNodeComparison()` | *How do two nodes differ?* (side-by-side region comparison) |
+
+```{r build}
+library(e2tree)
+library(randomForest)
+
+set.seed(42)
+data(iris)
+
+ensemble <- randomForest(Species ~ ., data = iris,
+                         importance = TRUE, proximity = TRUE)
+D <- createDisMatrix(ensemble, data = iris, label = "Species",
+                     parallel = list(active = FALSE, no_cores = 1))
+setting <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
+tree <- e2tree(Species ~ ., iris, D, ensemble, setting)
+```
+
+## 1. `localLoI()` --- where the tree is reliable
+
+`loi()` returns a single global number (and a within-/between-node split).
+`localLoI()` disaggregates the *same* statistic to each observation and each
+terminal node, so reliability becomes a map rather than a scalar. The
+per-observation values average **exactly** to the global normalised LoI.
+
+```{r localloi}
+vs   <- eValidation(iris, tree, D)
+prox <- proximity(vs)
+
+ll <- localLoI(prox$ensemble, prox$e2tree, fit = tree)
+print(ll)
+```
+
+The two diagnostics per node are:
+
+- `loi_in`: within-node calibration error (how well the node's internal
+  proximities match the ensemble);
+- `loi_out`: ensemble proximity *lost* by separating the node's members from
+  the rest (high values flag leaves that split apart observations the
+  ensemble considers similar).
+
+```{r localloi-check}
+# exact decomposition of the published global index
+all.equal(mean(ll$obs$loi), loi(prox$ensemble, prox$e2tree)$nloi)
+```
+
+```{r localloi-plot, fig.height = 4}
+plot(ll)
+```
+
+## 2. `eContribution()` --- why this prediction
+
+`eContribution()` gives an **exact, additive, per-instance** attribution via
+the Saabas decomposition: the prediction is the root value plus the change in
+node value at each split the observation passes through. Two observations that
+land in different leaves receive different contributions --- and different
+signs.
+
+```{r econtribution}
+ec <- eContribution(tree, newdata = iris[c(1, 84, 120), ])
+print(ec)
+```
+
+```{r econtribution-additive}
+# baseline + contributions reconstructs the prediction exactly
+all.equal(as.numeric(ec$baseline + rowSums(ec$contributions)), ec$prediction)
+```
+
+```{r econtribution-plot, fig.height = 4}
+plot(ec, obs = 2)
+```
+
+## 3. `eNeighbors()` --- the cases the ensemble finds similar
+
+Instead of attributing to features, `eNeighbors()` explains by example: it
+returns the training cases most similar to a query under the **ensemble's own
+proximity** (leaf co-occurrence), together with the prototypes of the query's
+leaf. Because the similarity comes from the ensemble, neighbours reflect how
+the *model* groups observations, not raw feature distance --- and the
+computation is identical for any supported backend.
+
+```{r eneighbors}
+nb <- eNeighbors(tree, ensemble, query = iris[c(1, 84, 120), ], k = 5)
+print(nb)
+```
+
+## 4. `eHeterogeneity()` --- how decisive is the ensemble per region
+
+`eHeterogeneity()` describes how heterogeneous the ensemble's outcomes are
+*inside* each reconstructed region (terminal node). It is purely descriptive:
+no prediction, no coverage guarantee. For classification it reports the regional
+class mix (purity, normalised entropy, the set of non-negligible classes); for
+regression it reports the centre and a central band of the regional outcomes.
+A region with high entropy / `set_size > 1` (classification) or a wide band
+(regression) is one where the ensemble's behaviour is intrinsically ambiguous.
+
+```{r eheterogeneity}
+h <- eHeterogeneity(tree, alpha = 0.1)
+print(h)
+```
+
+This complements `localLoI()`: `localLoI()` says how *faithfully* the tree
+reconstructs a region, while `eHeterogeneity()` says how *decisive* the ensemble
+itself is there.
+
+## 5. Inspecting and comparing nodes (`nodeStats`, `plotNodeComparison`)
+
+`nodeStats()` profiles a *single* node --- terminal **or internal** --- listing
+who is inside and what makes the region distinctive: per-predictor statistics
+against the rest of the population (Cohen's d for numeric, Cramer's V for
+categorical) and the within-region response distribution.
+
+```{r nodestats}
+term <- nodes(tree, terminal = TRUE)$node
+ns <- nodeStats(tree, node = term[1])
+print(ns)
+plot(ns)
+```
+
+`plotNodeComparison()` puts two nodes side by side and ranks the predictors on
+which they differ most --- the quickest way to answer "what separates these two
+regions the ensemble built?".
+
+```{r nodecompare, fig.height = 4}
+cmp <- plotNodeComparison(tree, term[1], term[2])
+head(cmp)
+```
+
+## 6. Putting it together: reliability-aware explanations
+
+The pieces compose. Pass a `localLoI` object to `eContribution()` and every
+explanation carries the fidelity of the leaf it lands in: an attribution in a
+high-`loi_out` leaf should be read with caution, because the tree is a weaker
+proxy for the ensemble there.
+
+```{r together}
+ec2 <- eContribution(tree, newdata = iris[c(1, 84, 120), ], reliability = ll)
+ec2$reliability
+```
+
+## Regression
+
+The same workflow applies to regression ensembles. Here `eContribution()`
+decomposes a region's reconstructed value and `eHeterogeneity()` reports the
+spread of outcomes within each region.
+
+```{r regression}
+data(mtcars)
+set.seed(7)
+tr <- sample(nrow(mtcars), 24)
+
+ens_r  <- randomForest(mpg ~ ., data = mtcars[tr, ], ntree = 400,
+                       proximity = TRUE)
+D_r    <- createDisMatrix(ens_r, data = mtcars[tr, ], label = "mpg",
+                          parallel = list(active = FALSE, no_cores = 1))
+tree_r <- e2tree(mpg ~ ., mtcars[tr, ], D_r, ens_r,
+                 list(impTotal = 0.1, maxDec = 1e-6, n = 2, level = 5))
+
+ec_r <- eContribution(tree_r, newdata = mtcars[tr[1:3], ])
+print(ec_r)
+```
+
+## One entry point: `explain()`
+
+The functions above each answer one local question. `explain()` composes them
+into a single per-instance account -- where the ensemble routed the instance,
+*why* (additive attribution), which cases it is grouped with, how reliable and
+how dispersed that region is -- and can attach two further layers on request.
+
+```{r explain}
+ex <- explain(tree, ensemble, newdata = iris[c(1, 84, 120), ],
+              reliability = ll, counterfactual = TRUE, stability = TRUE,
+              B = 50, seed = 1)
+print(ex)
+```
+
+### Contrastive explanation, verified on the ensemble
+
+`eCounterfactual()` asks what minimal feature change would move an instance into
+a *different* E2Tree region. Because e2tree is interpretive, the change is only
+meaningful if the **ensemble** also regroups the instance: the `validated` flag
+compares the counterfactual's leaf co-occurrence proximity to the target region
+against the source region. A "not validated" result is informative -- it shows
+the minimal surrogate-tree change is not enough to cross the ensemble's own
+grouping boundary.
+
+```{r counterfactual}
+cf <- eCounterfactual(tree, newdata = iris[c(84, 120), ], ensemble = ensemble)
+print(cf)
+```
+
+### How stable is the explanation?
+
+Most local explainers give a point estimate. `eStability()` bootstraps the
+ensemble's trees to turn the explanation into a distribution, reporting a
+confidence in the instance's grouping outcome and how often its nearest cases
+survive resampling -- a fidelity-uncertainty statement, not a predictive
+interval.
+
+```{r stability}
+st <- eStability(tree, ensemble, newdata = iris[c(1, 84, 120), ],
+                 B = 100, seed = 1)
+print(st)
+```
+
+## References
+
+- Aria, M., Gnasso, A., Iorio, C., & Pandolfo, G. (2024). Explainable
+  ensemble trees. *Computational Statistics*, 39(1), 3--19.
+- Aria, M., Gnasso, A., Iorio, C., & Fokkema, M. (2026). Extending
+  Explainable Ensemble Trees to Regression Contexts. *Applied Stochastic
+  Models in Business and Industry*, 42(1), e70064.
+- Saabas, A. (2014). Interpreting random forests.
+- Lundberg, S.M. & Lee, S.I. (2020). From local explanations to global
+  understanding with explainable AI for trees. *Nature Machine Intelligence*,
+  2(1), 56--67.
