@@ -140,8 +140,9 @@ get_ensemble_type.catboost.Model <- function(ensemble) {
 # leaf-index API over the prediction-value fallback when one is available,
 # without making the call hard-fail on older releases.
 .catboost_fn_opt <- function(name) {
-  if (!requireNamespace("catboost", quietly = TRUE)) return(NULL)
-  tryCatch(getExportedValue("catboost", name), error = function(e) NULL)
+  pkg <- "catboost"
+  if (!requireNamespace(pkg, quietly = TRUE)) return(NULL)
+  tryCatch(getExportedValue(pkg, name), error = function(e) NULL)
 }
 
 # Internal worker shared by both CatBoost class names.  Older releases of the

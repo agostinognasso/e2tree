@@ -24,7 +24,7 @@ utils::globalVariables(c("variable", "delta_std", "dir_fill"))
 #'   \item rebuilds each candidate's \strong{decision box} by walking the path
 #'     from the root: the node id encodes the direction taken at every ancestor
 #'     (left child \eqn{2t}, right child \eqn{2t+1}), and the ancestor's split
-#'     rule (\code{\link{parse_all_splits}}) gives the constraint (numeric
+#'     rule (\code{parse_all_splits}) gives the constraint (numeric
 #'     \eqn{x \le \theta} / \eqn{x > \theta}; categorical \eqn{x \in S} /
 #'     \eqn{x \notin S}). Constraints on the same variable are intersected;
 #'   \item computes the \strong{minimal change} that moves the instance into the

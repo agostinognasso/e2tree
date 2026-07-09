@@ -340,7 +340,7 @@ plot.e2stability <- function(x, type = c("profile", "beeswarm", "scatter", "fore
   g + ggplot2::scale_y_continuous(limits = c(0, NA),
         expand = ggplot2::expansion(mult = c(0.02, 0.10))) +
     ggplot2::labs(title = "Explanation stability across observations", subtitle = sub,
-      x = "instances ordered by prototype proximity (peripheral → central)",
+      x = "instances ordered by prototype proximity (peripheral -> central)",
       y = "proximity to region prototype") +
     .stab_theme(drop_x = TRUE)
 }
