@@ -17,6 +17,9 @@ status](https://www.r-pkg.org/badges/version/e2tree)](https://CRAN.R-project.org
 <img src="man/figures/e2tree_logo.png" width="400"  />
 </p>
 
+📖 **Documentation, tutorials and function reference:**
+<https://e2tree.agostinognasso.com/>
+
 The **Explainable Ensemble Trees** (**e2tree**) key idea consists of the
 definition of an algorithm to represent every ensemble approach based on
 decision trees model using a single tree-like structure. The goal is to

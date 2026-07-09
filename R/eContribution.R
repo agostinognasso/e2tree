@@ -1,4 +1,5 @@
-utils::globalVariables(c("variable_name", "contrib_val", "sign_fill"))
+utils::globalVariables(c("variable_name", "contrib_val", "sign_fill",
+                         "instance", "contrib", "feature"))
 
 #' Per-Instance Feature Attribution (Saabas Decomposition)
 #'

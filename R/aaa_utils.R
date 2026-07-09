@@ -8,10 +8,16 @@ e2_variance <- function(x) {
   sum((x - mean(x))^2) / length(x)
 }
 
+#' Test Availability of a Suggested Package
+#' @keywords internal
+has_package <- function(pkg) {
+  requireNamespace(pkg, quietly = TRUE)
+}
+
 #' Check Availability of Suggested Packages
 #' @keywords internal
 check_package <- function(pkg) {
-  if (!requireNamespace(pkg, quietly = TRUE)) {
+  if (!has_package(pkg)) {
     stop(
       sprintf("Package '%s' is required but not installed. Please install it with: install.packages('%s')", pkg, pkg),
       call. = FALSE

@@ -1,4 +1,5 @@
-utils::globalVariables(c("node_lab"))
+utils::globalVariables(c("node_lab", "prop", "region", "entropy", "lower",
+                         "upper", "width"))
 
 #' Outcome Heterogeneity per E2Tree Region
 #'

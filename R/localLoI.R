@@ -38,9 +38,9 @@
 #' the function works without \code{fit}. When \code{fit} is supplied, the
 #' detected blocks are relabelled with the actual E2Tree terminal-node ids.
 #'
-#' @param O Ensemble proximity matrix (\eqn{n \times n}), values in [0, 1].
+#' @param O Ensemble proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 #'   Typically \code{proximity(eValidation(...))$ensemble}.
-#' @param O_hat E2Tree proximity matrix (\eqn{n \times n}), values in [0, 1].
+#' @param O_hat E2Tree proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 #'   Typically \code{proximity(eValidation(...))$e2tree}.
 #' @param fit Optional \code{e2tree} object, used only to label nodes with
 #'   their real terminal-node ids. Default \code{NULL}.

@@ -7,10 +7,10 @@
 localLoI(O, O_hat, fit = NULL)
 }
 \arguments{
-\item{O}{Ensemble proximity matrix (\eqn{n \times n}), values in \link{0, 1}.
+\item{O}{Ensemble proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 Typically \code{proximity(eValidation(...))$ensemble}.}
 
-\item{O_hat}{E2Tree proximity matrix (\eqn{n \times n}), values in \link{0, 1}.
+\item{O_hat}{E2Tree proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 Typically \code{proximity(eValidation(...))$e2tree}.}
 
 \item{fit}{Optional \code{e2tree} object, used only to label nodes with
