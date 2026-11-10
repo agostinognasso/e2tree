@@ -23,12 +23,19 @@
 #'
 #' @param O Proximity matrix from the ensemble model (n x n), values in the interval 0 to 1
 #' @param O_hat Proximity matrix estimated by E2Tree (n x n), values in the interval 0 to 1
+#' @param leaves Optional vector of terminal-node memberships (length n, in
+#'   the row order of the matrices). When given, within-node pairs are those
+#'   sharing a leaf; otherwise they are identified by \code{O_hat > 0}, which
+#'   misclassifies pairs in leaves with zero weight.
 #' @param normalize Logical. If TRUE (default), returns nLoI (divided by M).
 #'   If FALSE, returns raw LoI.
 #'
 #' @return An object of class \code{"loi"} containing:
 #'   \item{loi}{Raw LoI value (unnormalized)}
 #'   \item{nloi}{Normalized LoI (LoI / M)}
+#'   \item{sqrt_nloi}{Square root of the nLoI, a metric on proximity matrices}
+#'   \item{null_mean}{Exact mean of the nLoI under random row/column relabelling}
+#'   \item{kappa}{Chance-corrected fidelity \code{1 - nloi / null_mean}}
 #'   \item{loi_in}{Within-node component (total)}
 #'   \item{loi_out}{Between-node component (total)}
 #'   \item{mean_in}{Per-pair average within-node loss (comparable with mean_out)}
@@ -90,7 +97,7 @@
 #'
 #' @importFrom graphics barplot layout text
 #' @export
-loi <- function(O, O_hat, normalize = TRUE) {
+loi <- function(O, O_hat, normalize = TRUE, leaves = NULL) {
 
   # -------------------------------------------------------------------------
   # INPUT VALIDATION
@@ -121,9 +128,15 @@ loi <- function(O, O_hat, normalize = TRUE) {
   # DECOMPOSITION: within-node vs between-node
   # -------------------------------------------------------------------------
 
-  # Between-node pairs: O_hat == 0 (E2Tree separated them)
-  is_between <- ohat_vec == 0
-  is_within <- !is_between
+  # Between-node pairs: pairs in different leaves (or O_hat == 0 if the
+  # partition is not supplied)
+  if (!is.null(leaves)) {
+    if (length(leaves) != n) stop("leaves must have length nrow(O)")
+    is_within <- (leaves[row(O)] == leaves[col(O)])[idx]
+  } else {
+    is_within <- ohat_vec > 0
+  }
+  is_between <- !is_within
 
   # Within-node component: standard LoI formula
   if (sum(is_within) > 0) {
@@ -135,9 +148,9 @@ loi <- function(O, O_hat, normalize = TRUE) {
     loi_in <- 0
   }
 
-  # Between-node component: reduces to sum(o_ij) for pairs where O_hat == 0
-  # Because (o - 0)^2 / max(o, 0) = o when o > 0, and 0 when o == 0
-  loi_out <- sum(o_vec[is_between], na.rm = TRUE)
+  # Between-node component: O_hat = 0 for separated pairs, so each term
+  # reduces to (o - 0)^2 / max(o, 0) = o (0 when o == 0)
+  loi_out <- sum(.loi_terms(o_vec[is_between], ohat_vec[is_between]))
 
   # Total
   loi_total <- loi_in + loi_out
@@ -157,9 +170,14 @@ loi <- function(O, O_hat, normalize = TRUE) {
   # BUILD RESULT OBJECT
   # -------------------------------------------------------------------------
 
+  null_mean <- .nloi_null_mean(o_vec, ohat_vec)
+
   result <- list(
     loi       = loi_total,
     nloi      = nloi,
+    sqrt_nloi = sqrt(nloi),
+    null_mean = null_mean,
+    kappa     = .fid_kappa(nloi, null_mean, TRUE),
     loi_in    = loi_in,
     loi_out   = loi_out,
     mean_in   = mean_in,
@@ -186,7 +204,11 @@ print.loi <- function(x, digits = 4, ...) {
   cat("  Loss of Interpretability (LoI)\n")
   cat("  -------------------------------------------\n")
   cat(sprintf("  nLoI (normalized):   %.*f\n", digits, x$nloi))
+  cat(sprintf("  sqrt(nLoI) (metric): %.*f\n", digits, x$sqrt_nloi))
   cat(sprintf("  LoI (raw):           %.*f\n", digits, x$loi))
+  if (!is.null(x$kappa) && !is.na(x$kappa)) {
+    cat(sprintf("  Exact null mean:     %.*f   kappa = %.3f\n", digits, x$null_mean, x$kappa))
+  }
   cat(sprintf("  n = %d, pairs = %d\n", x$n, x$m))
   cat("\n")
 
@@ -312,12 +334,20 @@ plot.loi <- function(x, ...) {
 #' @param n_perm Number of permutations (default: 999)
 #' @param conf.level Confidence level for intervals (default: 0.95)
 #' @param seed Random seed for reproducibility. Default is NULL.
+#' @param n_boot Number of bootstrap replicates (observations resampled with
+#'   replacement, pairs of copies of the same observation excluded) for the
+#'   confidence interval of the nLoI. Default 0 (no interval).
 #'
 #' @return An object of class \code{"loi_perm"} containing:
 #'   \item{observed}{Observed nLoI value and decomposition (loi object)}
 #'   \item{statistic}{Observed nLoI value (scalar)}
 #'   \item{p.value}{Test p-value (one-sided, less)}
-#'   \item{ci}{Permutation-based confidence interval for nLoI}
+#'   \item{ci}{Bootstrap percentile confidence interval for the nLoI
+#'     (NA when \code{n_boot = 0}). Earlier versions returned a shifted
+#'     permutation interval, which is not a confidence interval for any
+#'     parameter and has been removed.}
+#'   \item{exact_null_mean}{Exact permutation mean of the nLoI}
+#'   \item{kappa}{Chance-corrected fidelity}
 #'   \item{null_dist}{Null distribution of nLoI values}
 #'   \item{null_mean}{Mean of the null distribution}
 #'   \item{null_sd}{Standard deviation of the null distribution}
@@ -356,7 +386,7 @@ plot.loi <- function(x, ...) {
 #' @export
 loi_perm <- function(O, O_hat, n_perm = 999,
                      conf.level = 0.95,
-                     seed = NULL) {
+                     seed = NULL, n_boot = 0) {
 
   if (!is.null(seed)) set.seed(seed)
 
@@ -410,18 +440,18 @@ loi_perm <- function(O, O_hat, n_perm = 999,
   z_stat <- (obs$nloi - null_mean) / null_sd
 
   # -------------------------------------------------------------------------
-  # CONFIDENCE INTERVAL
+  # BOOTSTRAP CONFIDENCE INTERVAL (observation-level, conditional on the fits)
   # -------------------------------------------------------------------------
 
-  alpha <- 1 - conf.level
-  null_quantiles <- quantile(null_dist, probs = c(alpha / 2, 1 - alpha / 2),
-                              na.rm = TRUE)
-  p_shift <- null_mean - null_quantiles
-  ci_raw <- obs$nloi + p_shift
-  ci <- c(ci_raw[2], ci_raw[1])
-  ci <- pmax(ci, 0)
-  names(ci) <- c(paste0((alpha / 2) * 100, "%"),
-                  paste0((1 - alpha / 2) * 100, "%"))
+  ci <- c(NA_real_, NA_real_)
+  if (n_boot > 0) {
+    alpha <- 1 - conf.level
+    bm <- .fid_boot(pmin(pmax(O, 0), 1), pmin(pmax(O_hat, 0), 1), n_boot)
+    ci <- quantile(bm[, "nLoI"], probs = c(alpha / 2, 1 - alpha / 2),
+                   na.rm = TRUE, names = FALSE)
+  }
+  names(ci) <- c(paste0((1 - conf.level) / 2 * 100, "%"),
+                 paste0((1 - (1 - conf.level) / 2) * 100, "%"))
 
   # -------------------------------------------------------------------------
   # BUILD RESULT
@@ -434,6 +464,8 @@ loi_perm <- function(O, O_hat, n_perm = 999,
     ci         = ci,
     null_dist  = null_dist,
     null_mean  = null_mean,
+    exact_null_mean = obs$null_mean,
+    kappa      = obs$kappa,
     null_sd    = null_sd,
     z_stat     = z_stat,
     n_perm     = n_perm,

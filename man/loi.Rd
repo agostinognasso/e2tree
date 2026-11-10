@@ -4,7 +4,7 @@
 \alias{loi}
 \title{Loss of Interpretability (LoI) Index}
 \usage{
-loi(O, O_hat, normalize = TRUE)
+loi(O, O_hat, normalize = TRUE, leaves = NULL)
 }
 \arguments{
 \item{O}{Proximity matrix from the ensemble model (n x n), values in the interval 0 to 1}
@@ -13,11 +13,19 @@ loi(O, O_hat, normalize = TRUE)
 
 \item{normalize}{Logical. If TRUE (default), returns nLoI (divided by M).
 If FALSE, returns raw LoI.}
+
+\item{leaves}{Optional vector of terminal-node memberships (length n, in
+the row order of the matrices). When given, within-node pairs are those
+sharing a leaf; otherwise they are identified by \code{O_hat > 0}, which
+misclassifies pairs in leaves with zero weight.}
 }
 \value{
 An object of class \code{"loi"} containing:
 \item{loi}{Raw LoI value (unnormalized)}
 \item{nloi}{Normalized LoI (LoI / M)}
+\item{sqrt_nloi}{Square root of the nLoI, a metric on proximity matrices}
+\item{null_mean}{Exact mean of the nLoI under random row/column relabelling}
+\item{kappa}{Chance-corrected fidelity \code{1 - nloi / null_mean}}
 \item{loi_in}{Within-node component (total)}
 \item{loi_out}{Between-node component (total)}
 \item{mean_in}{Per-pair average within-node loss (comparable with mean_out)}

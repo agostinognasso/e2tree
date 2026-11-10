@@ -12,7 +12,10 @@ eValidation(
   graph = TRUE,
   n_perm = 999,
   conf.level = 0.95,
-  seed = NULL
+  seed = NULL,
+  transform = c("sqrt", "none"),
+  n_boot = 0,
+  delta = NULL
 )
 }
 \arguments{
@@ -24,34 +27,73 @@ eValidation(
 
 \item{test}{Character string specifying which tests to perform. One of
 \code{"both"} (default), \code{"mantel"} (Mantel test only), or
-\code{"measures"} (divergence/similarity measures with permutation tests only).}
+\code{"measures"} (agreement measures only).}
 
 \item{graph}{Logical (default TRUE). If TRUE, heatmaps are displayed.}
 
-\item{n_perm}{Integer. Number of permutations for the permutation
-test on measures. Default is 999. Set to 0 to skip permutation testing.
-Ignored when \code{test = "mantel"}.}
+\item{n_perm}{Integer. Number of permutations. Default 999. Set to 0 to
+skip the permutation test.}
 
-\item{conf.level}{Numeric. Confidence level for intervals. Default is 0.95.}
+\item{conf.level}{Numeric. Confidence level for bootstrap intervals and
+the equivalence test. Default 0.95.}
 
 \item{seed}{Integer or NULL. Random seed for reproducibility.}
+
+\item{transform}{Character. Scale on which the measures are computed:
+\code{"sqrt"} (default, as in e2tree versions up to 1.0.0.9000) uses
+\eqn{\sqrt{O}} and \eqn{\sqrt{\hat{O}}}; \code{"none"} uses the
+proximities \eqn{O} and \eqn{\hat{O}} directly, the scale on which the
+measures are defined in Aria et al. (nLoI paper).}
+
+\item{n_boot}{Integer. Number of bootstrap replicates for confidence
+intervals. Default 0 (no bootstrap).}
+
+\item{delta}{Numeric or NULL. Equivalence margin for the nLoI. If given
+(and \code{n_boot > 0}), fidelity is declared when the one-sided upper
+bootstrap bound of the nLoI is below \code{delta}.}
 }
 \value{
 An object of class \code{"eValidation"} containing:
 \describe{
-\item{Proximity_matrix_ensemble}{Ensemble proximity matrix (reordered)}
-\item{Proximity_matrix_e2tree}{E2Tree proximity matrix (reordered)}
+\item{Proximity_matrix_ensemble}{Ensemble proximity matrix (reordered, transformed)}
+\item{Proximity_matrix_e2tree}{E2Tree proximity matrix (reordered, transformed)}
 \item{mantel_test}{Mantel test result (NULL if \code{test = "measures"})}
 \item{loi}{LoI object with decomposition (NULL if \code{test = "mantel"})}
-\item{measures}{Data frame with all measures (NULL if \code{test = "mantel"})}
-\item{permutation}{Permutation test results for measures (if applicable)}
+\item{measures}{Data frame with observed values, null moments, Z, p-values,
+kappa and bootstrap intervals}
+\item{permutation}{Permutation results (null distributions)}
+\item{bootstrap}{Bootstrap replicates (if \code{n_boot > 0})}
+\item{equivalence}{Equivalence test for the nLoI (if \code{delta} is given)}
 }
 }
 \description{
-Compares the ensemble proximity matrix with the E2Tree-estimated proximity
-matrix using multiple divergence and similarity measures. Can perform the
-Mantel test, permutation tests on divergence/similarity measures (nLoI,
-Hellinger, wRMSE, RV, SSIM), or both.
+Compares the ensemble proximity matrix \eqn{O} with the E2Tree proximity
+matrix \eqn{\hat{O}} through a family of agreement measures (nLoI and its
+metric version \eqn{\sqrt{nLoI}}, Hellinger distance, wRMSE, RV
+(congruence) coefficient, SSIM) and the Mantel correlation as an
+association baseline. Three complementary outputs are returned:
+\enumerate{
+\item \strong{Point estimates} of each measure and the chance-corrected
+fidelity \eqn{\kappa = 1 - \tau/\mu_0} (divergences) or
+\eqn{\kappa = (\tau - \mu_0)/(1 - \mu_0)} (similarities), where
+\eqn{\mu_0} is the mean under random relabelling (exact, closed form,
+for the nLoI).
+\item A \strong{unified row/column permutation test} of the null
+hypothesis of no association between the two structures (a minimal
+requirement, not evidence of high fidelity).
+\item Optional \strong{bootstrap confidence intervals} (observation-level
+resampling, conditional on the fitted models) and an optional
+\strong{equivalence test} \eqn{H_0: nLoI \ge \delta}.
+}
+}
+\details{
+The nLoI is a symmetric Csiszar f-divergence with generator
+\eqn{f(t) = (t-1)^2/\max(1,t)}; it is not a metric, whereas
+\eqn{\sqrt{nLoI}} satisfies the triangle inequality. Being a monotone
+transformation, \eqn{\sqrt{nLoI}} has the same permutation p-value as the
+nLoI. SSIM is computed under the canonical ordering given by hierarchical
+clustering of \code{D}; unlike the other measures it is not invariant to
+the ordering of the observations and is excluded from the bootstrap.
 }
 \examples{
 \donttest{
@@ -70,7 +112,8 @@ D <- createDisMatrix(ensemble, data=training, label = "Species",
 setting <- list(impTotal=0.1, maxDec=0.01, n=2, level=5)
 tree <- e2tree(Species ~ ., training, D, ensemble, setting)
 
-val <- eValidation(training, tree, D, n_perm = 199)
+val <- eValidation(training, tree, D, n_perm = 199, n_boot = 199,
+                   delta = 0.1)
 print(val)
 summary(val)
 plot(val)

@@ -4,7 +4,7 @@
 \alias{loi_perm}
 \title{Permutation Test for LoI}
 \usage{
-loi_perm(O, O_hat, n_perm = 999, conf.level = 0.95, seed = NULL)
+loi_perm(O, O_hat, n_perm = 999, conf.level = 0.95, seed = NULL, n_boot = 0)
 }
 \arguments{
 \item{O}{Proximity matrix from the ensemble model (n x n)}
@@ -16,13 +16,22 @@ loi_perm(O, O_hat, n_perm = 999, conf.level = 0.95, seed = NULL)
 \item{conf.level}{Confidence level for intervals (default: 0.95)}
 
 \item{seed}{Random seed for reproducibility. Default is NULL.}
+
+\item{n_boot}{Number of bootstrap replicates (observations resampled with
+replacement, pairs of copies of the same observation excluded) for the
+confidence interval of the nLoI. Default 0 (no interval).}
 }
 \value{
 An object of class \code{"loi_perm"} containing:
 \item{observed}{Observed nLoI value and decomposition (loi object)}
 \item{statistic}{Observed nLoI value (scalar)}
 \item{p.value}{Test p-value (one-sided, less)}
-\item{ci}{Permutation-based confidence interval for nLoI}
+\item{ci}{Bootstrap percentile confidence interval for the nLoI
+(NA when \code{n_boot = 0}). Earlier versions returned a shifted
+permutation interval, which is not a confidence interval for any
+parameter and has been removed.}
+\item{exact_null_mean}{Exact permutation mean of the nLoI}
+\item{kappa}{Chance-corrected fidelity}
 \item{null_dist}{Null distribution of nLoI values}
 \item{null_mean}{Mean of the null distribution}
 \item{null_sd}{Standard deviation of the null distribution}

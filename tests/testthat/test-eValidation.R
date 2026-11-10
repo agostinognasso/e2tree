@@ -110,3 +110,32 @@ test_that("eValidation handles incorrect input types (regression case)", {
   expect_error(eValidation(training, fit, matrix(1, 5, 5), graph=FALSE),
                "Error: The number of rows in 'data' must match the dimensions of 'D'.")
 })
+
+test_that("eValidation: transform, kappa, bootstrap and equivalence", {
+  set.seed(42)
+  data(iris)
+  training <- iris[sample(seq_len(nrow(iris)), 105), ]
+  ensemble <- randomForest(Species ~ ., data = training, proximity = TRUE)
+  D <- createDisMatrix(ensemble, data = training, label = "Species",
+                       parallel = list(active = FALSE, no_cores = 1))
+  fit <- e2tree(Species ~ ., training, D, ensemble,
+                list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5))
+
+  v <- eValidation(training, fit, D, graph = FALSE, test = "measures",
+                   n_perm = 49, n_boot = 49, delta = 0.5, seed = 1,
+                   transform = "none")
+  expect_equal(v$transform, "none")
+  expect_equal(eValidation(training, fit, D, graph = FALSE, test = "measures",
+                           n_perm = 0)$transform, "sqrt")
+  expect_true(all(c("kappa", "ci_lower", "ci_upper", "p_value") %in% names(v$measures)))
+  expect_equal(v$measures$observed[v$measures$method == "sqrt_nLoI"],
+               sqrt(v$measures$observed[v$measures$method == "nLoI"]))
+  expect_true(v$equivalence$fidelity)
+  expect_output(print(v), "kappa")
+
+  vs <- eValidation(training, fit, D, graph = FALSE, test = "measures",
+                    n_perm = 0, transform = "sqrt")
+  expect_equal(vs$Proximity_matrix_ensemble, sqrt(v$Proximity_matrix_ensemble))
+  expect_warning(eValidation(training, fit, D, graph = FALSE, test = "measures",
+                             n_perm = 0, delta = 0.1), "delta is ignored")
+})
