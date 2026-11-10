@@ -286,12 +286,18 @@ The `eValidation()` function supports two approaches via the `test` argument:
 | Measure | Type | Range | What it measures |
 |---------|------|-------|------------------|
 | **nLoI** | divergence | [0, 1] | Normalized Loss of Interpretability --- weighted divergence with diagnostic decomposition |
+| **sqrt(nLoI)** | divergence | [0, 1] | Square root of the nLoI --- a proper metric (the nLoI itself violates the triangle inequality) |
 | **Hellinger** | divergence | [0, 1] | Hellinger distance --- robust to sparse matrices |
 | **wRMSE** | divergence | [0, 1] | Weighted RMSE --- emphasizes high-proximity regions |
 | **RV** | similarity | [0, 1] | RV coefficient --- global structural similarity (scale-invariant) |
 | **SSIM** | similarity | [-1, 1] | Structural Similarity Index --- captures local block patterns |
 
-All measures are tested simultaneously using a **unified row/column permutation test**.
+All measures are tested simultaneously using a **unified row/column permutation test**, and the Mantel correlation is reported in the same table with the same permutations. Every measure also comes with a chance-corrected fidelity `kappa` (the null mean of the nLoI is computed exactly). With `n_boot > 0` the intervals are obtained by an observation-level bootstrap, and `delta` adds an equivalence test of H0: nLoI >= `delta`.
+
+Two details matter when comparing with the nLoI paper:
+
+- **Scale.** By default (`transform = "sqrt"`) the measures are computed on the square roots of the proximity matrices. The scale on which they are defined in the paper is the proximities themselves, which `transform = "none"` gives.
+- **Leaf weights in regression.** The E2Tree proximity uses the leaf weight `Wt`, the normalized-variance index, which can be zero for leaves that are too heterogeneous. Within-node pairs are then identified from the leaves of the tree and not from `O_hat > 0`.
 
 
 ### Running the validation
@@ -318,6 +324,14 @@ summary(val)
 plot(val)
 ```
 
+**On the scale of the paper, with bootstrap intervals:**
+
+```{r val-paper-scale}
+val_paper <- eValidation(training, tree, D, test = "measures", graph = FALSE,
+                         n_perm = 999, n_boot = 199, transform = "none", seed = 42)
+measures(val_paper)
+```
+
 ### Extracting results with accessors
 
 Use accessor functions instead of direct `$` access:
@@ -342,6 +356,8 @@ The nLoI is unique among the measures because it decomposes into two interpretab
 
 Since the number of within-node and between-node pairs can differ dramatically, the `loi()` function reports **per-pair averages** (`mean_in` and `mean_out`) that enable meaningful comparison:
 
+When some leaves have weight zero (possible in regression), pass the leaf of each row through the `leaves` argument, as `eValidation()` does internally; otherwise within-node pairs are identified by `O_hat > 0`.
+
 ```{r}
 O <- proximity(val, type = "ensemble")
 O_hat <- proximity(val, type = "e2tree")
@@ -363,7 +379,7 @@ The per-pair averages provide actionable diagnostics:
 For a quick significance assessment:
 
 ```{r}
-perm <- loi_perm(O, O_hat, n_perm = 999, seed = 42)
+perm <- loi_perm(O, O_hat, n_perm = 999, n_boot = 199, seed = 42)
 print(perm)
 ```
 

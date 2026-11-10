@@ -284,11 +284,12 @@ does it indicate *where* the reconstruction fails.
 ### Divergence and Similarity Measures
 
 To assess *agreement* rather than mere association, we use a family of
-five measures, each capturing a distinct aspect of reconstruction quality:
+measures, each capturing a distinct aspect of reconstruction quality:
 
 | Measure | Type | Range | What it captures |
 |---------|------|-------|------------------|
 | **nLoI** (normalized Loss of Interpretability) | divergence | [0, 1] | Scale-sensitive per-pair discrepancy with diagnostic decomposition |
+| **sqrt(nLoI)** | divergence | [0, 1] | Square root of the nLoI, which is a metric (the nLoI itself is not) |
 | **Hellinger** distance | divergence | [0, 1] | Variance-stabilized element-wise difference (a true metric) |
 | **wRMSE** (weighted Root Mean Squared Error) | divergence | [0, 1] | Weighted average discrepancy emphasizing high-proximity regions |
 | **RV** coefficient | similarity | [0, 1] | Global structural similarity (matrix-level correlation) |
@@ -296,6 +297,13 @@ five measures, each capturing a distinct aspect of reconstruction quality:
 
 For *divergence* measures, lower values indicate better reconstruction.
 For *similarity* measures, higher values indicate better reconstruction.
+Each measure is also reported with a chance-corrected fidelity `kappa`
+(1 for perfect agreement, about 0 for an arbitrary grouping), and the Mantel
+correlation appears in the same table. By default the measures are computed on
+the square roots of the proximity matrices (`transform = "sqrt"`); the scale
+on which they are defined in the nLoI paper, the proximities themselves, is
+obtained with `transform = "none"`. With `n_boot > 0`, `eValidation()` adds
+observation-level bootstrap intervals.
 
 Statistical significance is assessed through a unified permutation testing
 framework based on simultaneous row/column permutation of $\hat{\mathbf{O}}_T$.
