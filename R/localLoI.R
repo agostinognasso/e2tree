@@ -33,21 +33,43 @@
 #' exact spatial decomposition of the published statistic, not a separate
 #' metric.
 #'
-#' The leaf partition is recovered directly from the block structure of
-#' \code{O_hat} (two observations share a leaf iff \eqn{\hat{o}_{ij} > 0}), so
-#' the function works without \code{fit}. When \code{fit} is supplied, the
-#' detected blocks are relabelled with the actual E2Tree terminal-node ids.
+#' \strong{Leaf partition.} As in \code{\link{loi}} with its \code{leaves}
+#' argument, the within/between split is defined by the actual leaves of the
+#' E2Tree. They are taken, in order of preference, from the \code{leaves}
+#' argument, from the terminal nodes of \code{fit}, or from the block structure
+#' of \code{O_hat} (two observations share a leaf iff
+#' \eqn{\hat{o}_{ij} > 0}). The last option cannot recognise leaves of weight
+#' zero, whose members have \eqn{\hat{o}_{ij} = 0} even though they share a
+#' leaf (this happens in regression); supply \code{fit} or \code{leaves}
+#' whenever possible. A warning is issued when the blocks are used and some
+#' observations have no within-leaf neighbour.
+#'
+#' \strong{Row order.} \code{\link{eValidation}} returns its proximity matrices
+#' in hierarchical-clustering order, with the original observation indices as
+#' row names. When \code{O_hat} carries such row names, they are used to match
+#' the leaves of \code{fit} to the rows and are reported in \code{obs}; without
+#' them the rows are assumed to follow the data order.
+#'
+#' \strong{Scale.} The decomposition is computed on the matrices it receives.
+#' The nLoI of the paper is defined on the proximities themselves, which
+#' \code{eValidation(..., transform = "none")} returns; with the default
+#' \code{transform = "sqrt"} the matrices are square-rooted and the index is
+#' that of the square-root scale.
 #'
 #' @param O Ensemble proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 #'   Typically \code{proximity(eValidation(...))$ensemble}.
 #' @param O_hat E2Tree proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 #'   Typically \code{proximity(eValidation(...))$e2tree}.
-#' @param fit Optional \code{e2tree} object, used only to label nodes with
-#'   their real terminal-node ids. Default \code{NULL}.
+#' @param fit Optional \code{e2tree} object. Its terminal nodes define the leaf
+#'   partition and supply the node ids. Default \code{NULL}.
+#' @param leaves Optional vector of length \code{nrow(O)} giving the leaf of
+#'   each row of the matrices, with the same meaning as in \code{\link{loi}}.
+#'   It takes precedence over \code{fit}. Default \code{NULL}.
 #'
 #' @return An object of class \code{"localLoI"}:
-#'   \item{obs}{Data frame: \code{obs}, \code{node}, \code{loi},
-#'     \code{loi_in}, \code{loi_out}, \code{n_within}, \code{n_between}.}
+#'   \item{obs}{Data frame: \code{obs} (original observation index), \code{node},
+#'     \code{loi}, \code{loi_in}, \code{loi_out}, \code{n_within},
+#'     \code{n_between}.}
 #'   \item{node}{Data frame: \code{node}, \code{n}, \code{loi_in},
 #'     \code{loi_out}, \code{mean_loi}, \code{n_within}, \code{n_between}.}
 #'   \item{nloi}{Global normalised LoI (equals \code{mean(obs$loi)}).}
@@ -66,7 +88,7 @@
 #' setting <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
 #' tree <- e2tree(Species ~ ., iris, D, ensemble, setting)
 #'
-#' vs    <- eValidation(iris, tree, D)
+#' vs    <- eValidation(iris, tree, D, graph = FALSE, transform = "none")
 #' prox  <- proximity(vs)
 #' ll    <- localLoI(prox$ensemble, prox$e2tree, fit = tree)
 #' print(ll)
@@ -76,7 +98,7 @@
 #'
 #' @importFrom graphics barplot hist abline text par
 #' @export
-localLoI <- function(O, O_hat, fit = NULL) {
+localLoI <- function(O, O_hat, fit = NULL, leaves = NULL) {
 
   # ---- Input validation (mirrors loi()) -----------------------------------
   if (!is.matrix(O) || !is.matrix(O_hat)) {
@@ -91,8 +113,15 @@ localLoI <- function(O, O_hat, fit = NULL) {
   if (!is.null(fit) && !inherits(fit, "e2tree")) {
     stop("'fit', when supplied, must be an e2tree object")
   }
+  if (!is.null(leaves) && (length(leaves) != nrow(O) || anyNA(leaves))) {
+    stop("'leaves' must have length nrow(O) and no missing values")
+  }
 
   n <- nrow(O)
+
+  # Original observation index of each row (the matrices of eValidation() are
+  # in hclust order and carry the original indices as row names)
+  row_id <- .localLoI_row_index(O, O_hat, n)
 
   # ---- Per-pair contribution matrix ---------------------------------------
   # c_ij = (o - o_hat)^2 / max(o, o_hat); 0 where both are 0.
@@ -102,8 +131,27 @@ localLoI <- function(O, O_hat, fit = NULL) {
   C[is.na(C)] <- 0
   diag(C) <- 0
 
-  within_mask <- (O_hat > 0)
+  # ---- Leaf partition and within/between mask ------------------------------
+  # With a known partition (leaves or fit) within-leaf pairs are those sharing a
+  # leaf, as in loi(leaves =); only without one does O_hat > 0 stand in for it.
+  part <- .localLoI_membership(O_hat, fit, leaves, row_id)
+  membership <- part$membership
+  within_mask <- if (part$known) {
+    outer(membership, membership, "==")
+  } else {
+    (O_hat > 0)
+  }
   diag(within_mask) <- FALSE
+
+  if (!part$known) {
+    n_iso <- sum(rowSums(within_mask) == 0L)
+    if (n_iso > 0L) {
+      warning("localLoI: ", n_iso, " observation(s) have no within-leaf neighbour ",
+              "(O_hat is 0 for all their pairs). If they belong to leaves of weight ",
+              "zero the within/between split is wrong: supply `fit` or `leaves` to ",
+              "use the real leaf partition.", call. = FALSE)
+    }
+  }
 
   # ---- Per-observation decomposition --------------------------------------
   # loi_i      : mean c_ij over all j != i
@@ -120,11 +168,8 @@ localLoI <- function(O, O_hat, fit = NULL) {
   loi_in_obs  <- ifelse(n_within  > 0, sum_within  / n_within,  0)
   loi_out_obs <- ifelse(n_between > 0, sum_between / n_between, 0)
 
-  # ---- Leaf membership ----------------------------------------------------
-  membership <- .localLoI_membership(O_hat, fit, n)
-
   obs_df <- data.frame(
-    obs       = seq_len(n),
+    obs       = row_id,
     node      = membership,
     loi       = loi_obs,
     loi_in    = loi_in_obs,
@@ -187,19 +232,50 @@ localLoI <- function(O, O_hat, fit = NULL) {
 
 
 # ---------------------------------------------------------------------------
-# Internal: recover leaf membership
+# Internal: original observation index of each row of the matrices
 # ---------------------------------------------------------------------------
-# Preference order:
-#   1. If `fit` is supplied and its terminal-node observation sets form a valid
-#      partition of seq_len(n), use the real node ids.
-#   2. Otherwise, recover blocks as connected components of (O_hat > 0).
-.localLoI_membership <- function(O_hat, fit, n) {
+# eValidation() orders its proximity matrices by hierarchical clustering and
+# stores the original observation indices as row names. If O_hat carries row
+# names that are a permutation of 1..n they give the index of each row;
+# otherwise the rows are taken to be in data order.
+.localLoI_row_index <- function(O, O_hat, n) {
+  as_id <- function(M) {
+    rn <- rownames(M)
+    if (is.null(rn)) return(NULL)
+    id <- suppressWarnings(as.integer(rn))
+    if (anyNA(id) || !identical(as.character(id), rn) ||
+        anyDuplicated(id) || !setequal(id, seq_len(n))) return(NULL)
+    id
+  }
+  id_hat <- as_id(O_hat)
+  id_o   <- as_id(O)
+  if (!is.null(id_hat) && !is.null(id_o) && !identical(id_hat, id_o)) {
+    warning("localLoI: O and O_hat have different row names (different row ",
+            "orders); the order of O_hat is used.", call. = FALSE)
+  }
+  if (is.null(id_hat)) seq_len(n) else id_hat
+}
+
+# ---------------------------------------------------------------------------
+# Internal: leaf membership of each row of the matrices
+# ---------------------------------------------------------------------------
+# Returns list(membership, known). Preference order:
+#   1. `leaves`, one leaf label per row, as in loi(leaves =).
+#   2. `fit`: the terminal nodes of the e2tree, whose observation sets must form
+#      a valid partition of 1..n; they are in data order, so they are mapped to
+#      the rows through `row_id`.
+#   3. Otherwise the blocks of (O_hat > 0), flagged as not known: they cannot
+#      recognise leaves of weight zero.
+.localLoI_membership <- function(O_hat, fit, leaves, row_id) {
+  n <- length(row_id)
+
+  if (!is.null(leaves)) return(list(membership = leaves, known = TRUE))
 
   if (!is.null(fit)) {
     td <- fit$tree
     if (!is.null(td) && "terminal" %in% names(td) && "obs" %in% names(td)) {
       term <- td[td$terminal == TRUE, , drop = FALSE]
-      m <- rep(NA_integer_, n)
+      m <- rep(NA_integer_, n)          # leaf of each observation, in data order
       ok <- TRUE
       for (k in seq_len(nrow(term))) {
         idx <- suppressWarnings(as.integer(unlist(term$obs[k])))
@@ -207,13 +283,13 @@ localLoI <- function(O, O_hat, fit = NULL) {
         if (length(idx) == 0L || any(idx < 1L) || any(idx > n)) { ok <- FALSE; break }
         m[idx] <- as.integer(term$node[k])
       }
-      if (ok && !any(is.na(m))) return(m)
+      if (ok && !any(is.na(m))) return(list(membership = m[row_id], known = TRUE))
       warning("localLoI: fit$tree$obs does not align with the proximity matrix; ",
               "falling back to block detection from O_hat.", call. = FALSE)
     }
   }
 
-  .localLoI_blocks(O_hat)
+  list(membership = .localLoI_blocks(O_hat), known = FALSE)
 }
 
 # Connected components of the (O_hat > 0) graph. Leaves are cliques in O_hat,

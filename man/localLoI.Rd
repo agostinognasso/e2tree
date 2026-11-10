@@ -4,7 +4,7 @@
 \alias{localLoI}
 \title{Local Loss of Interpretability (Local LoI)}
 \usage{
-localLoI(O, O_hat, fit = NULL)
+localLoI(O, O_hat, fit = NULL, leaves = NULL)
 }
 \arguments{
 \item{O}{Ensemble proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
@@ -13,13 +13,18 @@ Typically \code{proximity(eValidation(...))$ensemble}.}
 \item{O_hat}{E2Tree proximity matrix (\eqn{n \times n}), values in \eqn{[0, 1]}.
 Typically \code{proximity(eValidation(...))$e2tree}.}
 
-\item{fit}{Optional \code{e2tree} object, used only to label nodes with
-their real terminal-node ids. Default \code{NULL}.}
+\item{fit}{Optional \code{e2tree} object. Its terminal nodes define the leaf
+partition and supply the node ids. Default \code{NULL}.}
+
+\item{leaves}{Optional vector of length \code{nrow(O)} giving the leaf of
+each row of the matrices, with the same meaning as in \code{\link{loi}}.
+It takes precedence over \code{fit}. Default \code{NULL}.}
 }
 \value{
 An object of class \code{"localLoI"}:
-\item{obs}{Data frame: \code{obs}, \code{node}, \code{loi},
-\code{loi_in}, \code{loi_out}, \code{n_within}, \code{n_between}.}
+\item{obs}{Data frame: \code{obs} (original observation index), \code{node},
+\code{loi}, \code{loi_in}, \code{loi_out}, \code{n_within},
+\code{n_between}.}
 \item{node}{Data frame: \code{node}, \code{n}, \code{loi_in},
 \code{loi_out}, \code{mean_loi}, \code{n_within}, \code{n_between}.}
 \item{nloi}{Global normalised LoI (equals \code{mean(obs$loi)}).}
@@ -59,10 +64,28 @@ The per-observation values average exactly to the normalised global index:
 exact spatial decomposition of the published statistic, not a separate
 metric.
 
-The leaf partition is recovered directly from the block structure of
-\code{O_hat} (two observations share a leaf iff \eqn{\hat{o}_{ij} > 0}), so
-the function works without \code{fit}. When \code{fit} is supplied, the
-detected blocks are relabelled with the actual E2Tree terminal-node ids.
+\strong{Leaf partition.} As in \code{\link{loi}} with its \code{leaves}
+argument, the within/between split is defined by the actual leaves of the
+E2Tree. They are taken, in order of preference, from the \code{leaves}
+argument, from the terminal nodes of \code{fit}, or from the block structure
+of \code{O_hat} (two observations share a leaf iff
+\eqn{\hat{o}_{ij} > 0}). The last option cannot recognise leaves of weight
+zero, whose members have \eqn{\hat{o}_{ij} = 0} even though they share a
+leaf (this happens in regression); supply \code{fit} or \code{leaves}
+whenever possible. A warning is issued when the blocks are used and some
+observations have no within-leaf neighbour.
+
+\strong{Row order.} \code{\link{eValidation}} returns its proximity matrices
+in hierarchical-clustering order, with the original observation indices as
+row names. When \code{O_hat} carries such row names, they are used to match
+the leaves of \code{fit} to the rows and are reported in \code{obs}; without
+them the rows are assumed to follow the data order.
+
+\strong{Scale.} The decomposition is computed on the matrices it receives.
+The nLoI of the paper is defined on the proximities themselves, which
+\code{eValidation(..., transform = "none")} returns; with the default
+\code{transform = "sqrt"} the matrices are square-rooted and the index is
+that of the square-root scale.
 }
 \examples{
 \donttest{
@@ -74,7 +97,7 @@ D <- createDisMatrix(ensemble, data = iris, label = "Species",
 setting <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
 tree <- e2tree(Species ~ ., iris, D, ensemble, setting)
 
-vs    <- eValidation(iris, tree, D)
+vs    <- eValidation(iris, tree, D, graph = FALSE, transform = "none")
 prox  <- proximity(vs)
 ll    <- localLoI(prox$ensemble, prox$e2tree, fit = tree)
 print(ll)

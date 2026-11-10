@@ -58,6 +58,77 @@ test_that("localLoI node table is consistent", {
   expect_true(all(ll$node$loi_out >= 0))
 })
 
+# Leaf id of every observation, in data order
+leaf_of <- function(tree, n) {
+  td   <- tree$tree
+  term <- td[td$terminal == TRUE, , drop = FALSE]
+  m <- rep(NA_integer_, n)
+  for (k in seq_len(nrow(term))) m[unlist(term$obs[k])] <- as.integer(term$node[k])
+  m
+}
+
+test_that("localLoI follows the row order of the proximity matrices", {
+  # eValidation() returns the matrices in hclust order; their row names hold
+  # the original observation indices. Node ids must follow those indices.
+  obj  <- build_iris_tree()
+  vs   <- eValidation(obj$data, obj$tree, obj$D, graph = FALSE,
+                      test = "measures", n_perm = 0)
+  prox <- proximity(vs)
+  n    <- nrow(obj$data)
+  ord  <- as.integer(rownames(prox$e2tree))
+  expect_false(identical(ord, seq_len(n)))   # the check below needs a real reordering
+
+  ll <- localLoI(prox$ensemble, prox$e2tree, fit = obj$tree)
+  expect_equal(ll$obs$obs, ord)
+  expect_equal(ll$obs$node, leaf_of(obj$tree, n)[ord])
+
+  # the per-node table cannot depend on how the matrices are ordered
+  inv     <- order(ord)
+  ll_data <- localLoI(prox$ensemble[inv, inv], prox$e2tree[inv, inv],
+                      fit = obj$tree)
+  expect_equal(ll$node, ll_data$node)
+})
+
+test_that("localLoI reproduces the within/between split of loi(leaves =)", {
+  obj  <- build_iris_tree()
+  vs   <- eValidation(obj$data, obj$tree, obj$D, graph = FALSE,
+                      test = "measures", n_perm = 0)
+  prox <- proximity(vs)
+  ord  <- as.integer(rownames(prox$e2tree))
+
+  g  <- loi(prox$ensemble, prox$e2tree,
+            leaves = leaf_of(obj$tree, nrow(obj$data))[ord])
+  ll <- localLoI(prox$ensemble, prox$e2tree, fit = obj$tree)
+
+  expect_equal(ll$nloi, g$nloi)
+  expect_equal(sum(ll$obs$n_within) / 2, g$n_within)
+  expect_equal(sum(ll$obs$n_within  * ll$obs$loi_in)  / 2, g$loi_in)
+  expect_equal(sum(ll$obs$n_between * ll$obs$loi_out) / 2, g$loi_out)
+})
+
+test_that("localLoI uses the supplied partition, also for zero-weight leaves", {
+  # Leaf 2 has weight zero: O_hat is 0 between its members, so "same leaf iff
+  # O_hat > 0" would misread them as separated. The partition must decide.
+  leaves <- rep(1:3, c(4, 5, 3))
+  w      <- c(0.8, 0, 0.6)
+  O_hat  <- outer(leaves, leaves, function(a, b) (a == b) * w[a])
+  diag(O_hat) <- 1
+  set.seed(1); M <- matrix(runif(144, 0, 0.4), 12, 12)
+  O <- (M + t(M)) / 2; diag(O) <- 1
+
+  g  <- loi(O, O_hat, leaves = leaves)
+  ll <- localLoI(O, O_hat, leaves = leaves)
+
+  expect_equal(ll$nloi, g$nloi)
+  expect_equal(sum(ll$obs$n_within) / 2, g$n_within)
+  expect_equal(sum(ll$obs$n_within  * ll$obs$loi_in)  / 2, g$loi_in)
+  expect_equal(sum(ll$obs$n_between * ll$obs$loi_out) / 2, g$loi_out)
+  expect_equal(sort(unique(ll$obs$node)), 1:3)
+
+  # without a partition the zero-weight leaf cannot be recognised: say so
+  expect_warning(localLoI(O, O_hat), "no within-leaf")
+})
+
 # ---------------------------------------------------------------------------
 # eContribution()
 # ---------------------------------------------------------------------------
