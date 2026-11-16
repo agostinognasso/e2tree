@@ -66,8 +66,8 @@ terminal node, so reliability becomes a map rather than a scalar. The
 per-observation values average **exactly** to the global normalised LoI.
 
 ```{r localloi}
-# transform = "none": proximities on the scale on which the nLoI is defined
-vs   <- eValidation(iris, tree, D, graph = FALSE, transform = "none")
+# proximities on the scale on which the nLoI is defined (the default)
+vs   <- eValidation(iris, tree, D, graph = FALSE)
 prox <- proximity(vs)
 
 ll <- localLoI(prox$ensemble, prox$e2tree, fit = tree)

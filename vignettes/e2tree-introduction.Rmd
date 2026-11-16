@@ -239,8 +239,9 @@ validation, selectable through the `test` argument:
 - **`test = "mantel"`**: The Mantel test, a classical non-parametric
   test of *association* between similarity matrices.
 - **`test = "measures"`**: A family of divergence and similarity measures
-  that assess *agreement* between the matrices, with permutation-based
-  inference.
+  that assess *agreement* between the matrices, with a permutation test of
+  association, a chance-corrected fidelity (`kappa`) and, on request,
+  bootstrap confidence intervals and an equivalence test.
 - **`test = "both"`** (default): Performs both.
 
 ### Association vs. Agreement
@@ -299,10 +300,10 @@ For *divergence* measures, lower values indicate better reconstruction.
 For *similarity* measures, higher values indicate better reconstruction.
 Each measure is also reported with a chance-corrected fidelity `kappa`
 (1 for perfect agreement, about 0 for an arbitrary grouping), and the Mantel
-correlation appears in the same table. By default the measures are computed on
-the square roots of the proximity matrices (`transform = "sqrt"`); the scale
-on which they are defined in the nLoI paper, the proximities themselves, is
-obtained with `transform = "none"`. With `n_boot > 0`, `eValidation()` adds
+correlation appears in the same table. The measures are computed on the
+proximities themselves (`transform = "none"`, the default), the scale on
+which they are defined; `transform = "sqrt"` reproduces the square-root scale
+used by versions up to 1.2.0. With `n_boot > 0`, `eValidation()` adds
 observation-level bootstrap intervals.
 
 Statistical significance is assessed through a unified permutation testing
@@ -354,11 +355,13 @@ that avoids singularities when $\hat{o}_{ij} = 0$ (which is common in
 E2Tree due to the block-diagonal structure of $\hat{\mathbf{O}}_T$).
 
 The `loi()` function computes the nLoI and its decomposition directly
-from two proximity matrices:
+from two proximity matrices. The `leaves` component of the `eValidation`
+object gives the leaf of each row, so that within-node pairs are those that
+share a leaf (this matters in regression, where a leaf can have weight zero):
 
 ```{r loi-classification}
 prox <- proximity(val_full)
-result <- loi(prox$ensemble, prox$e2tree)
+result <- loi(prox$ensemble, prox$e2tree, leaves = val_full$leaves)
 summary(result)
 ```
 
@@ -408,10 +411,11 @@ plot(result)
 
 The `loi_perm()` function provides a standalone permutation test for the
 nLoI, useful when a quick assessment of reconstruction significance is
-needed without computing all five measures:
+needed without computing all the measures:
 
 ```{r loi-perm}
-perm <- loi_perm(prox$ensemble, prox$e2tree, n_perm = 499, seed = 42)
+perm <- loi_perm(prox$ensemble, prox$e2tree, n_perm = 499, seed = 42,
+                 leaves = val_full$leaves)
 print(perm)
 plot(perm)
 ```

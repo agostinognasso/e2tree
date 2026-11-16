@@ -497,14 +497,15 @@ nLoI \>= `delta`.
 
 Two details matter when comparing with the nLoI paper:
 
-- **Scale.** By default (`transform = "sqrt"`) the measures are computed
-  on the square roots of the proximity matrices. The scale on which they
-  are defined in the paper is the proximities themselves, which
-  `transform = "none"` gives.
+- **Scale.** The measures are computed on the proximities themselves
+  (`transform = "none"`, the default), the scale on which they are
+  defined. Versions up to 1.2.0 used the square roots of the two
+  matrices, which `transform = "sqrt"` reproduces.
 - **Leaf weights in regression.** The E2Tree proximity uses the leaf
   weight `Wt`, the normalized-variance index, which can be zero for
   leaves that are too heterogeneous. Within-node pairs are then
-  identified from the leaves of the tree and not from `O_hat > 0`.
+  identified from the leaves of the tree and not from `O_hat > 0`; the
+  leaf of each row of the matrices is returned as `val$leaves`.
 
 ### Running the validation
 
@@ -518,24 +519,25 @@ val <- eValidation(training, tree, D, test = "both", graph = FALSE, n_perm = 999
 print(val)
 #> 
 #>   E2Tree Validation
-#>   Matrix dimension: 90 x 90   Pairs: 4005   Scale: sqrt(O)
-#>   Mantel test (ape): z = 1046.09, p = 0.0010
+#>   Matrix dimension: 90 x 90   Pairs: 4005   Scale: O
+#>   Mantel test (ape, O-hat vs 1 - D): z = 1046.09, p = 0.0010 (two-sided)
 #> 
 #>   --------------------------------------------------------------------------------------------
 #>   Measure           Observed Null mean    kappa         Z   p-value
 #>   --------------------------------------------------------------------------------------------
-#>   nLoI       [div]    0.0480    0.4128    0.884    -56.66     0.001 
-#>   sqrt_nLoI  [div]    0.2190    0.6423    0.659    -83.83     0.001 
-#>   Hellinger  [div]    0.2154    0.6250    0.655    -81.19     0.001 
-#>   wRMSE      [div]    0.1700    0.8406    0.798   -142.36     0.001 
-#>   RV         [sim]    0.9674    0.3294    0.951    +57.04     0.001 
-#>   SSIM       [sim]    0.6420    0.0088    0.639   +116.47     0.001 
-#>   Mantel     [sim]    0.9566    0.0006    0.957    +57.04     0.001 
+#>   nLoI       [div]    0.0238    0.3969    0.940    -56.78     0.001 
+#>   sqrt_nLoI  [div]    0.1543    0.6298    0.755    -90.49     0.001 
+#>   Hellinger  [div]    0.1367    0.6179    0.779    -92.67     0.001 
+#>   wRMSE      [div]    0.1646    0.8546    0.807   -140.57     0.001 
+#>   RV         [sim]    0.9835    0.3054    0.976    +55.43     0.001 
+#>   SSIM       [sim]    0.8311    0.0110    0.829   +142.89     0.001 
+#>   Mantel     [sim]    0.9769    0.0008    0.977    +55.43     0.001 
 #>   --------------------------------------------------------------------------------------------
 #>   Permutations: 999 (row/column, shared by all measures)
-#>   LoI decomposition (per-pair averages): mean_in = 0.0074, mean_out = 0.0647
+#>   LoI decomposition (per-pair averages): mean_in = 0.0249, mean_out = 0.0234
 #> 
 #>   [div] lower = better; [sim] higher = better. kappa: 1 = perfect, 0 = random relabelling.
+#>   Mantel row: Pearson correlation of the off-diagonal entries, on the scale above.
 #>   The permutation test assesses association only; fidelity is judged by the
 #>   observed values, kappa and their confidence intervals.
 ```
@@ -546,24 +548,25 @@ print(val)
 summary(val)
 #> 
 #>   E2Tree Validation
-#>   Matrix dimension: 90 x 90   Pairs: 4005   Scale: sqrt(O)
-#>   Mantel test (ape): z = 1046.09, p = 0.0010
+#>   Matrix dimension: 90 x 90   Pairs: 4005   Scale: O
+#>   Mantel test (ape, O-hat vs 1 - D): z = 1046.09, p = 0.0010 (two-sided)
 #> 
 #>   --------------------------------------------------------------------------------------------
 #>   Measure           Observed Null mean    kappa         Z   p-value
 #>   --------------------------------------------------------------------------------------------
-#>   nLoI       [div]    0.0480    0.4128    0.884    -56.66     0.001 
-#>   sqrt_nLoI  [div]    0.2190    0.6423    0.659    -83.83     0.001 
-#>   Hellinger  [div]    0.2154    0.6250    0.655    -81.19     0.001 
-#>   wRMSE      [div]    0.1700    0.8406    0.798   -142.36     0.001 
-#>   RV         [sim]    0.9674    0.3294    0.951    +57.04     0.001 
-#>   SSIM       [sim]    0.6420    0.0088    0.639   +116.47     0.001 
-#>   Mantel     [sim]    0.9566    0.0006    0.957    +57.04     0.001 
+#>   nLoI       [div]    0.0238    0.3969    0.940    -56.78     0.001 
+#>   sqrt_nLoI  [div]    0.1543    0.6298    0.755    -90.49     0.001 
+#>   Hellinger  [div]    0.1367    0.6179    0.779    -92.67     0.001 
+#>   wRMSE      [div]    0.1646    0.8546    0.807   -140.57     0.001 
+#>   RV         [sim]    0.9835    0.3054    0.976    +55.43     0.001 
+#>   SSIM       [sim]    0.8311    0.0110    0.829   +142.89     0.001 
+#>   Mantel     [sim]    0.9769    0.0008    0.977    +55.43     0.001 
 #>   --------------------------------------------------------------------------------------------
 #>   Permutations: 999 (row/column, shared by all measures)
-#>   LoI decomposition (per-pair averages): mean_in = 0.0074, mean_out = 0.0647
+#>   LoI decomposition (per-pair averages): mean_in = 0.0249, mean_out = 0.0234
 #> 
 #>   [div] lower = better; [sim] higher = better. kappa: 1 = perfect, 0 = random relabelling.
+#>   Mantel row: Pearson correlation of the off-diagonal entries, on the scale above.
 #>   The permutation test assesses association only; fidelity is judged by the
 #>   observed values, kappa and their confidence intervals.
 #> 
@@ -573,27 +576,27 @@ summary(val)
 #>    Loss of Interpretability (LoI) --Decomposition
 #> ##############################################################################
 #> 
-#>   nLoI (normalized):   0.0480
-#>   LoI (raw):           192.1100
+#>   nLoI (normalized):   0.0238
+#>   LoI (raw):           95.3116
 #>   n = 90, pairs = 4005 (within: 1168, between: 2837)
 #> 
 #> ------------------------------------------------------------------------------
 #>   Component              Total       Pairs     Mean/pair
 #> ------------------------------------------------------------------------------
-#>   Within-node (LoI_in)    8.6039       1168     0.007366
-#>   Between-node (LoI_out)183.5062       2837     0.064683
+#>   Within-node (LoI_in)   29.0289       1168     0.024854
+#>   Between-node (LoI_out) 66.2827       2837     0.023364
 #> ------------------------------------------------------------------------------
 #> 
 #>   Per-pair interpretation (comparable across components):
 #> 
-#>     mean_in  = 0.007366  (avg calibration error within nodes)
-#>     mean_out = 0.064683  (avg ensemble proximity lost by separation)
+#>     mean_in  = 0.024854  (avg calibration error within nodes)
+#>     mean_out = 0.023364  (avg ensemble proximity lost by separation)
 #> 
 #>   Diagnostic: LOW mean_out. The partition correctly separates pairs
 #>   that have low ensemble proximity --the tree structure is well-placed.
 #> 
-#>   Diagnostic: LOW mean_in. Within-node proximity values closely
-#>   match the ensemble --excellent calibration.
+#>   Diagnostic: MODERATE mean_in. Some within-node calibration error,
+#>   typical of the fuzzy-to-crisp structural transition.
 #> 
 #> ##############################################################################
 ```
@@ -606,28 +609,36 @@ plot(val)
 
 <img src="man/figures/README-unnamed-chunk-26-1.png" alt="" width="100%" />
 
-**On the scale of the paper, with bootstrap intervals:**
+**With bootstrap intervals and an equivalence test** (H0: nLoI \>= 0.1):
 
 ``` r
-val_paper <- eValidation(training, tree, D, test = "measures", graph = FALSE,
-                         n_perm = 999, n_boot = 199, transform = "none", seed = 42)
-measures(val_paper)
-#>              method       type   observed    null_mean     null_sd     z_stat
-#> nLoI           nLoI divergence 0.02379816 3.968858e-01 0.006328491  -58.95365
-#> sqrt_nLoI sqrt_nLoI divergence 0.15426653 6.299786e-01 0.005048059  -94.23661
-#> Hellinger Hellinger divergence 0.13674034 6.180578e-01 0.005004481  -96.17731
-#> wRMSE         wRMSE divergence 0.16462378 8.548019e-01 0.004754145 -145.17397
-#> RV               RV similarity 0.98350707 3.049371e-01 0.011838679   57.31805
-#> SSIM           SSIM similarity 0.83109941 1.086159e-02 0.005709038  143.67355
-#> Mantel       Mantel similarity 0.97689017 1.509565e-05 0.017043061   57.31805
-#>           p_value     kappa   ci_lower   ci_upper
-#> nLoI        0.001 0.9400378 0.01247859 0.03621428
-#> sqrt_nLoI   0.001 0.7551242 0.11170731 0.19030050
-#> Hellinger   0.001 0.7787580 0.08625090 0.18057890
-#> wRMSE       0.001 0.8074129 0.13187447 0.19795346
-#> RV          0.001 0.9762713 0.97362860 0.99065051
-#> SSIM        0.001 0.8292447         NA         NA
-#> Mantel      0.001 0.9768898 0.96497040 0.98636848
+val_boot <- eValidation(training, tree, D, test = "measures", graph = FALSE,
+                        n_perm = 999, n_boot = 199, delta = 0.1, seed = 42)
+print(val_boot)
+#> 
+#>   E2Tree Validation
+#>   Matrix dimension: 90 x 90   Pairs: 4005   Scale: O
+#> 
+#>   --------------------------------------------------------------------------------------------
+#>   Measure           Observed Null mean    kappa         Z   p-value  95% bootstrap CI
+#>   --------------------------------------------------------------------------------------------
+#>   nLoI       [div]    0.0238    0.3969    0.940    -58.95     0.001  [0.0125, 0.0362] 
+#>   sqrt_nLoI  [div]    0.1543    0.6300    0.755    -94.24     0.001  [0.1117, 0.1903] 
+#>   Hellinger  [div]    0.1367    0.6181    0.779    -96.18     0.001  [0.0863, 0.1806] 
+#>   wRMSE      [div]    0.1646    0.8548    0.807   -145.17     0.001  [0.1319, 0.1980] 
+#>   RV         [sim]    0.9835    0.3049    0.976    +57.32     0.001  [0.9736, 0.9907] 
+#>   SSIM       [sim]    0.8311    0.0109    0.829   +143.67     0.001  -- 
+#>   Mantel     [sim]    0.9769    0.0000    0.977    +57.32     0.001  [0.9650, 0.9864] 
+#>   --------------------------------------------------------------------------------------------
+#>   Permutations: 999 (row/column, shared by all measures)
+#>   Bootstrap: 199 replicates (observations resampled); kappa(nLoI) CI [0.900, 0.970]
+#>   Equivalence test H0: nLoI >= 0.1000 -> upper 95% bound = 0.0333: fidelity established
+#>   LoI decomposition (per-pair averages): mean_in = 0.0249, mean_out = 0.0234
+#> 
+#>   [div] lower = better; [sim] higher = better. kappa: 1 = perfect, 0 = random relabelling.
+#>   Mantel row: Pearson correlation of the off-diagonal entries, on the scale above.
+#>   The permutation test assesses association only; fidelity is judged by the
+#>   observed values, kappa and their confidence intervals.
 ```
 
 ### Extracting results with accessors
@@ -637,28 +648,28 @@ Use accessor functions instead of direct `$` access:
 ``` r
 # Validation measures table
 measures(val)
-#>              method       type   observed   null_mean     null_sd     z_stat
-#> nLoI           nLoI divergence 0.04796755 0.412781685 0.006438700  -56.65959
-#> sqrt_nLoI sqrt_nLoI divergence 0.21901496 0.642323933 0.005049318  -83.83489
-#> Hellinger Hellinger divergence 0.21542068 0.625021454 0.005044737  -81.19368
-#> wRMSE         wRMSE divergence 0.16995523 0.840584726 0.004710777 -142.36068
-#> RV               RV similarity 0.96743746 0.329429934 0.011185735   57.03760
-#> SSIM           SSIM similarity 0.64198676 0.008751186 0.005436671  116.47487
-#> Mantel       Mantel similarity 0.95659031 0.000551734 0.016761549   57.03760
+#>              method       type   observed    null_mean     null_sd     z_stat
+#> nLoI           nLoI divergence 0.02379816 0.3968858147 0.006570923  -56.77857
+#> sqrt_nLoI sqrt_nLoI divergence 0.15426653 0.6297510104 0.005254363  -90.49327
+#> Hellinger Hellinger divergence 0.13674034 0.6178906040 0.005191854  -92.67408
+#> wRMSE         wRMSE divergence 0.16462378 0.8546208304 0.004908716 -140.56569
+#> RV               RV similarity 0.98350707 0.3054479467 0.012231951   55.43344
+#> SSIM           SSIM similarity 0.83109941 0.0110314260 0.005738992  142.89408
+#> Mantel       Mantel similarity 0.97689017 0.0007505837 0.017609218   55.43344
 #>           p_value     kappa
-#> nLoI        0.001 0.8837944
-#> sqrt_nLoI   0.001 0.6590272
-#> Hellinger   0.001 0.6553387
-#> wRMSE       0.001 0.7978131
-#> RV          0.001 0.9514405
-#> SSIM        0.001 0.6388261
-#> Mantel      0.001 0.9565664
+#> nLoI        0.001 0.9400378
+#> sqrt_nLoI   0.001 0.7550357
+#> Hellinger   0.001 0.7786981
+#> wRMSE       0.001 0.8073721
+#> RV          0.001 0.9762539
+#> SSIM        0.001 0.8292154
+#> Mantel      0.001 0.9768728
 
 # Proximity matrices
 prox <- proximity(val, type = "both")
 str(prox, max.level = 1)
 #> List of 2
-#>  $ ensemble: num [1:90, 1:90] 1 0.947 0.951 0.917 0.92 ...
+#>  $ ensemble: num [1:90, 1:90] 1 0.898 0.905 0.842 0.847 ...
 #>   ..- attr(*, "dimnames")=List of 2
 #>  $ e2tree  : num [1:90, 1:90] 1 1 1 1 1 1 1 1 1 1 ...
 #>   ..- attr(*, "dimnames")=List of 2
@@ -679,42 +690,44 @@ Since the number of within-node and between-node pairs can differ
 dramatically, the `loi()` function reports **per-pair averages**
 (`mean_in` and `mean_out`) that enable meaningful comparison:
 
-When some leaves have weight zero (possible in regression), pass the
-leaf of each row through the `leaves` argument, as `eValidation()` does
-internally; otherwise within-node pairs are identified by `O_hat > 0`.
+Pass the leaf of each row through the `leaves` argument, as
+`eValidation()` does internally: `val$leaves` follows the row order of
+the matrices returned by `eValidation()`. Without it, within-node pairs
+are identified by `O_hat > 0`, which misreads leaves of weight zero
+(possible in regression); the nLoI itself does not change.
 
 ``` r
 O <- proximity(val, type = "ensemble")
 O_hat <- proximity(val, type = "e2tree")
 
-result <- loi(O, O_hat)
+result <- loi(O, O_hat, leaves = val$leaves)
 summary(result)
 #> 
 #> ##############################################################################
 #>    Loss of Interpretability (LoI) --Decomposition
 #> ##############################################################################
 #> 
-#>   nLoI (normalized):   0.0480
-#>   LoI (raw):           192.1100
+#>   nLoI (normalized):   0.0238
+#>   LoI (raw):           95.3116
 #>   n = 90, pairs = 4005 (within: 1168, between: 2837)
 #> 
 #> ------------------------------------------------------------------------------
 #>   Component              Total       Pairs     Mean/pair
 #> ------------------------------------------------------------------------------
-#>   Within-node (LoI_in)    8.6039       1168     0.007366
-#>   Between-node (LoI_out)183.5062       2837     0.064683
+#>   Within-node (LoI_in)   29.0289       1168     0.024854
+#>   Between-node (LoI_out) 66.2827       2837     0.023364
 #> ------------------------------------------------------------------------------
 #> 
 #>   Per-pair interpretation (comparable across components):
 #> 
-#>     mean_in  = 0.007366  (avg calibration error within nodes)
-#>     mean_out = 0.064683  (avg ensemble proximity lost by separation)
+#>     mean_in  = 0.024854  (avg calibration error within nodes)
+#>     mean_out = 0.023364  (avg ensemble proximity lost by separation)
 #> 
 #>   Diagnostic: LOW mean_out. The partition correctly separates pairs
 #>   that have low ensemble proximity --the tree structure is well-placed.
 #> 
-#>   Diagnostic: LOW mean_in. Within-node proximity values closely
-#>   match the ensemble --excellent calibration.
+#>   Diagnostic: MODERATE mean_in. Some within-node calibration error,
+#>   typical of the fuzzy-to-crisp structural transition.
 #> 
 #> ##############################################################################
 ```
@@ -735,30 +748,32 @@ The per-pair averages provide actionable diagnostics:
 For a quick significance assessment:
 
 ``` r
-perm <- loi_perm(O, O_hat, n_perm = 999, n_boot = 199, seed = 42)
+perm <- loi_perm(O, O_hat, n_perm = 999, n_boot = 199, seed = 42,
+                 leaves = val$leaves)
 print(perm)
 #> 
 #> ==============================================================================
 #>    Permutation Test for Loss of Interpretability (LoI)
 #> ==============================================================================
 #> 
-#>   Observed nLoI:       0.0480
-#>   Null mean:           0.4128
-#>   Null SD:             0.0062
-#>   Z-statistic:         -58.5019
+#>   Observed nLoI:       0.0238
+#>   Null mean:           0.3969
+#>   Exact null mean:     0.3969   kappa = 0.940
+#>   Null SD:             0.0063
+#>   Z-statistic:         -58.9556
 #> 
 #> ------------------------------------------------------------------------------
 #>   Hypothesis Test (H1: nLoI < expected by chance)
 #> ------------------------------------------------------------------------------
 #>   p-value:             0.0010 **
-#>   95% CI:             [0.0230, 0.0775]
 #>   Permutations:        999 (row/column)
+#>   95% bootstrap CI:    [0.0125, 0.0362]  (199 replicates)
 #> 
 #> ------------------------------------------------------------------------------
 #>   Decomposition (per-pair averages)
 #> ------------------------------------------------------------------------------
-#>   mean_in  (within):   0.007366  (n_pairs = 1168)
-#>   mean_out (between):  0.064683  (n_pairs = 2837)
+#>   mean_in  (within):   0.024854  (n_pairs = 1168)
+#>   mean_out (between):  0.023364  (n_pairs = 2837)
 #> 
 #> ==============================================================================
 #>   Signif. codes: 0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1

@@ -17,7 +17,7 @@ knitr::opts_chunk$set(
 
 ## Overview
 
-Starting from version 1.1.0, `e2tree` supports the following tree ensemble
+Starting from version 1.2.0, `e2tree` supports the following tree ensemble
 backends in addition to `randomForest` and `ranger`:
 
 | Package | Model class | Task |

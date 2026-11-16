@@ -2,24 +2,28 @@
 
 ## Breaking changes
 
-* Regression E2Trees: the E2Tree proximity matrix O-hat now uses the leaf weight `Wt` (normalized-variance index of Aria et al., 2025) instead of the `prob` column, which held a residual sum of squares truncated at one. This is a bug fix and no option restores the previous values; validation measures of regression trees change accordingly (classification trees are unaffected, as they have no `Wt`).
+* `eValidation()` now computes the fidelity measures on the proximities O and O-hat themselves (`transform = "none"`, the new default), the scale on which the nLoI and the other measures are defined. Up to version 1.2.0 they were computed on the square roots of the two matrices: `transform = "sqrt"` reproduces those values. The change concerns every model, classification included, and also the matrices returned by `proximity()`.
+* Regression E2Trees: the E2Tree proximity matrix O-hat now uses the leaf weight `Wt` (normalized-variance index of Aria et al., 2026) instead of the `prob` column, which held a residual sum of squares truncated at one. This is a bug fix and no option restores the previous values; validation measures of regression trees change accordingly (classification trees are unaffected, as they have no `Wt`).
 * `eValidation()` output: the shifted permutation "confidence interval" has been removed. The measures table gains `kappa`, bootstrap intervals (`n_boot`), the equivalence test (`delta`), and the rows `sqrt_nLoI` and `Mantel`.
+* `loi_perm()`: the shifted permutation interval has been removed as well. `ci` is now a bootstrap percentile interval, computed only when `n_boot > 0`; with the default `n_boot = 0` it is `NA`, and `print()` and `plot()` omit it.
+* `localLoI()`: the `obs` column reports the original observation index instead of the position of the row in the matrices (see *Local LoI* below).
 * `e2tree()` (regression): when the split with the lowest impurity does not pass the Wilcoxon test, the next candidates, in order of impurity, are tried (at most 10) instead of closing the node. Together with the quantile binning of thresholds described below, this can change the regression trees grown from the same ensemble and dissimilarity matrix, which is itself unchanged. For instance, on the Boston housing data with `impTotal = 0.01, maxDec = 0.001, n = 5, level = 10` the tree goes from 21 to 29 leaves, almost all of it due to the fallback. The thresholds can be restored to all distinct values with `setting = list(..., max_thresholds = Inf)`; the fallback has no switch.
 
 ## Reconstruction-fidelity measures (revision of the nLoI paper)
 
-* `eValidation()` gains `transform = c("sqrt", "none")`. The default, `"sqrt"`, keeps the previous behaviour (measures on the square roots of O and O-hat); `transform = "none"` computes the measures on the proximities O and O-hat, the scale on which they are defined in the nLoI paper.
-* New measure `sqrt_nLoI`, the square root of the nLoI, which is a metric (the nLoI itself does not satisfy the triangle inequality). The Mantel correlation is now reported in the same table, using the same permutations.
+* `eValidation()` gains `transform = c("none", "sqrt")`, which sets the scale of the measures (see *Breaking changes*).
+* New measure `sqrt_nLoI`, the square root of the nLoI, which is a metric (the nLoI itself does not satisfy the triangle inequality). The Mantel correlation (Pearson correlation of the off-diagonal entries, on the scale set by `transform`) is now reported in the same table, using the same permutations. `print()` keeps it apart from the `ape::mantel.test()` line of `test = "both"` and `test = "mantel"`, a different statistic (sum of the cross-products of O-hat and 1 - D, two-sided p-value).
 * Chance-corrected fidelity `kappa` for every measure; the null mean of the nLoI is computed exactly in closed form.
 * Confidence intervals are obtained by an observation-level bootstrap (`n_boot`), and `delta` gives an equivalence test H0: nLoI >= delta.
-* `loi()` returns `sqrt_nloi`, `null_mean` and `kappa`, and gains `leaves`, so that the in-leaf/out-of-leaf decomposition is correct when some leaves have weight zero; `loi_perm()` gains `seed` and `n_boot`.
-* Measure computations are shared in a single internal core (`R/fidelity.R`); the permuted off-diagonal vector is extracted once per permutation and reused by all measures. SSIM is about three times faster (identical values) and no longer fails when the window is larger than n.
+* `eValidation()` returns `leaves`, the terminal node of each row of its matrices, named by the original observation index, ready for the `leaves` argument of `loi()`, `loi_perm()` and `localLoI()`.
+* `loi()` returns `sqrt_nloi`, `null_mean` and `kappa`, and gains `leaves`, so that the in-leaf/out-of-leaf decomposition is correct when some leaves have weight zero. `loi_perm()` gains `n_boot` and `leaves`, and its printout reports the exact null mean and `kappa`.
+* Measure computations are shared in a single internal core (`R/fidelity.R`); the permuted off-diagonal vector is extracted once per permutation and reused by all measures. SSIM is about three times faster (identical values) and no longer fails when the window is larger than n. `loi_perm()` computes only the nLoI at each permutation, without the decomposition, so it is faster, with the same values.
 
 ## Local LoI aligned with the nLoI paper
 
 * `localLoI()` now defines within- and between-leaf pairs from the actual leaves of the E2Tree, as `loi(leaves = )` does, instead of assuming that two observations share a leaf only if their O-hat is positive. In regression, leaves of weight zero have O-hat equal to zero also between their own members, so the former rule counted those pairs as between-leaf and inflated `loi_out` (by about 24% on a Boston tree with 9 such leaves). The global `nloi` was not affected. The partition is taken from the new `leaves` argument, from `fit`, or, failing both, from the blocks of O-hat; the last option cannot recognise leaves of weight zero and now warns when some observations have no within-leaf neighbour.
 * The proximity matrices returned by `eValidation()` are in hierarchical-clustering order, with the original observation indices as row names. `localLoI(fit = )` used to read the node ids in data order, so per-node values were attributed to the wrong observations. It now maps the leaves to the rows through the row names, and `obs` reports the original observation index.
-* The nLoI of the paper is defined on the proximities themselves: use `eValidation(..., transform = "none")` to obtain matrices on that scale.
+* The nLoI is defined on the proximities themselves, which is now the default scale of the matrices returned by `eValidation()`: `localLoI()` applied to them decomposes the nLoI on that scale without further arguments.
 
 ## Panel e2tree: new capabilities
 

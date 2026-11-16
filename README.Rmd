@@ -296,8 +296,8 @@ All measures are tested simultaneously using a **unified row/column permutation 
 
 Two details matter when comparing with the nLoI paper:
 
-- **Scale.** By default (`transform = "sqrt"`) the measures are computed on the square roots of the proximity matrices. The scale on which they are defined in the paper is the proximities themselves, which `transform = "none"` gives.
-- **Leaf weights in regression.** The E2Tree proximity uses the leaf weight `Wt`, the normalized-variance index, which can be zero for leaves that are too heterogeneous. Within-node pairs are then identified from the leaves of the tree and not from `O_hat > 0`.
+- **Scale.** The measures are computed on the proximities themselves (`transform = "none"`, the default), the scale on which they are defined. Versions up to 1.2.0 used the square roots of the two matrices, which `transform = "sqrt"` reproduces.
+- **Leaf weights in regression.** The E2Tree proximity uses the leaf weight `Wt`, the normalized-variance index, which can be zero for leaves that are too heterogeneous. Within-node pairs are then identified from the leaves of the tree and not from `O_hat > 0`; the leaf of each row of the matrices is returned as `val$leaves`.
 
 
 ### Running the validation
@@ -324,12 +324,12 @@ summary(val)
 plot(val)
 ```
 
-**On the scale of the paper, with bootstrap intervals:**
+**With bootstrap intervals and an equivalence test** (H0: nLoI >= 0.1):
 
-```{r val-paper-scale}
-val_paper <- eValidation(training, tree, D, test = "measures", graph = FALSE,
-                         n_perm = 999, n_boot = 199, transform = "none", seed = 42)
-measures(val_paper)
+```{r val-bootstrap}
+val_boot <- eValidation(training, tree, D, test = "measures", graph = FALSE,
+                        n_perm = 999, n_boot = 199, delta = 0.1, seed = 42)
+print(val_boot)
 ```
 
 ### Extracting results with accessors
@@ -356,13 +356,13 @@ The nLoI is unique among the measures because it decomposes into two interpretab
 
 Since the number of within-node and between-node pairs can differ dramatically, the `loi()` function reports **per-pair averages** (`mean_in` and `mean_out`) that enable meaningful comparison:
 
-When some leaves have weight zero (possible in regression), pass the leaf of each row through the `leaves` argument, as `eValidation()` does internally; otherwise within-node pairs are identified by `O_hat > 0`.
+Pass the leaf of each row through the `leaves` argument, as `eValidation()` does internally: `val$leaves` follows the row order of the matrices returned by `eValidation()`. Without it, within-node pairs are identified by `O_hat > 0`, which misreads leaves of weight zero (possible in regression); the nLoI itself does not change.
 
 ```{r}
 O <- proximity(val, type = "ensemble")
 O_hat <- proximity(val, type = "e2tree")
 
-result <- loi(O, O_hat)
+result <- loi(O, O_hat, leaves = val$leaves)
 summary(result)
 ```
 
@@ -379,7 +379,8 @@ The per-pair averages provide actionable diagnostics:
 For a quick significance assessment:
 
 ```{r}
-perm <- loi_perm(O, O_hat, n_perm = 999, n_boot = 199, seed = 42)
+perm <- loi_perm(O, O_hat, n_perm = 999, n_boot = 199, seed = 42,
+                 leaves = val$leaves)
 print(perm)
 ```
 
