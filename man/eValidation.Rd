@@ -13,7 +13,7 @@ eValidation(
   n_perm = 999,
   conf.level = 0.95,
   seed = NULL,
-  transform = c("sqrt", "none"),
+  transform = c("none", "sqrt"),
   n_boot = 0,
   delta = NULL
 )
@@ -40,10 +40,11 @@ the equivalence test. Default 0.95.}
 \item{seed}{Integer or NULL. Random seed for reproducibility.}
 
 \item{transform}{Character. Scale on which the measures are computed:
-\code{"sqrt"} (default, as in e2tree versions up to 1.0.0.9000) uses
-\eqn{\sqrt{O}} and \eqn{\sqrt{\hat{O}}}; \code{"none"} uses the
-proximities \eqn{O} and \eqn{\hat{O}} directly, the scale on which the
-measures are defined in Aria et al. (nLoI paper).}
+\code{"none"} (default) uses the proximities \eqn{O} and \eqn{\hat{O}}
+directly, the scale on which the nLoI and the other measures are
+defined; \code{"sqrt"} uses \eqn{\sqrt{O}} and \eqn{\sqrt{\hat{O}}}, the
+scale used by \code{eValidation()} up to e2tree 1.2.0 (set it to
+reproduce results obtained with those versions).}
 
 \item{n_boot}{Integer. Number of bootstrap replicates for confidence
 intervals. Default 0 (no bootstrap).}
@@ -55,15 +56,27 @@ bootstrap bound of the nLoI is below \code{delta}.}
 \value{
 An object of class \code{"eValidation"} containing:
 \describe{
-\item{Proximity_matrix_ensemble}{Ensemble proximity matrix (reordered, transformed)}
-\item{Proximity_matrix_e2tree}{E2Tree proximity matrix (reordered, transformed)}
-\item{mantel_test}{Mantel test result (NULL if \code{test = "measures"})}
+\item{Proximity_matrix_ensemble}{Ensemble proximity matrix, in
+hierarchical-clustering order and on the scale set by
+\code{transform}; the row names are the original observation indices}
+\item{Proximity_matrix_e2tree}{E2Tree proximity matrix, in the same
+order and on the same scale}
+\item{leaves}{Terminal node of each row of the two matrices, named by
+the original observation index; pass it to the \code{leaves}
+argument of \code{\link{loi}}, \code{\link{loi_perm}} or
+\code{\link{localLoI}}}
+\item{mantel_test}{Result of \code{ape::mantel.test()} (NULL if
+\code{test = "measures"})}
 \item{loi}{LoI object with decomposition (NULL if \code{test = "mantel"})}
-\item{measures}{Data frame with observed values, null moments, Z, p-values,
-kappa and bootstrap intervals}
+\item{measures}{Data frame with one row per measure: \code{method},
+\code{type}, \code{observed}, \code{null_mean} and \code{kappa};
+\code{null_sd}, \code{z_stat} and \code{p_value} when
+\code{n_perm > 0}; \code{ci_lower} and \code{ci_upper} when
+\code{n_boot > 0} (NULL if \code{test = "mantel"})}
 \item{permutation}{Permutation results (null distributions)}
 \item{bootstrap}{Bootstrap replicates (if \code{n_boot > 0})}
 \item{equivalence}{Equivalence test for the nLoI (if \code{delta} is given)}
+\item{n, n_perm, n_boot, conf.level, transform, test}{The settings used}
 }
 }
 \description{
@@ -94,6 +107,22 @@ transformation, \eqn{\sqrt{nLoI}} has the same permutation p-value as the
 nLoI. SSIM is computed under the canonical ordering given by hierarchical
 clustering of \code{D}; unlike the other measures it is not invariant to
 the ordering of the observations and is excluded from the bootstrap.
+
+Two Mantel statistics can appear in the output. The row \code{Mantel} of
+the measures table is the Pearson correlation between the off-diagonal
+entries of the two matrices, on the scale set by \code{transform}, tested
+(one-sided) with the same permutations as the other measures. The Mantel
+test run when \code{test} is \code{"both"} or \code{"mantel"} is
+\code{ape::mantel.test()} applied to \eqn{\hat{O}} and \eqn{1 - D} on the
+original scale, with its own 999 permutations: its \code{z.stat} is the sum
+of the cross-products of the off-diagonal entries and its p-value is
+two-sided.
+
+In regression, leaves whose weight \eqn{W_t} is zero have
+\eqn{\hat{o}_{ij} = 0} also between their own members. The within- and
+between-leaf decomposition of the nLoI is therefore computed from the
+leaves of \code{fit} (returned as \code{leaves}), not from
+\eqn{\hat{o}_{ij} > 0}.
 }
 \examples{
 \donttest{

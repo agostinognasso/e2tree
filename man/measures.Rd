@@ -15,9 +15,14 @@ measures(x, ...)
 \item{...}{Additional arguments (ignored).}
 }
 \value{
-A data frame with columns for method name, type, observed value,
-and (if permutation tests were performed) null distribution statistics
-and p-values.
+A data frame with one row per measure (nLoI, sqrt_nLoI, Hellinger,
+wRMSE, RV, SSIM, Mantel) and the columns \code{method}, \code{type}
+(divergence or similarity), \code{observed}, \code{null_mean} and
+\code{kappa} (chance-corrected fidelity); \code{null_sd}, \code{z_stat}
+and \code{p_value} when permutations were run (\code{n_perm > 0});
+\code{ci_lower} and \code{ci_upper}, bootstrap percentile intervals,
+when \code{n_boot > 0}. \code{NULL} if \code{eValidation()} was run with
+\code{test = "mantel"}.
 }
 \description{
 Extracts the data frame of validation measures from an eValidation object,

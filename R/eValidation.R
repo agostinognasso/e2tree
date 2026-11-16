@@ -34,10 +34,11 @@ utils::globalVariables("tree") # to avoid CRAN check errors for tidyverse progra
 #'   the equivalence test. Default 0.95.
 #' @param seed Integer or NULL. Random seed for reproducibility.
 #' @param transform Character. Scale on which the measures are computed:
-#'   \code{"sqrt"} (default, as in e2tree versions up to 1.0.0.9000) uses
-#'   \eqn{\sqrt{O}} and \eqn{\sqrt{\hat{O}}}; \code{"none"} uses the
-#'   proximities \eqn{O} and \eqn{\hat{O}} directly, the scale on which the
-#'   measures are defined in Aria et al. (nLoI paper).
+#'   \code{"none"} (default) uses the proximities \eqn{O} and \eqn{\hat{O}}
+#'   directly, the scale on which the nLoI and the other measures are
+#'   defined; \code{"sqrt"} uses \eqn{\sqrt{O}} and \eqn{\sqrt{\hat{O}}}, the
+#'   scale used by \code{eValidation()} up to e2tree 1.2.0 (set it to
+#'   reproduce results obtained with those versions).
 #' @param n_boot Integer. Number of bootstrap replicates for confidence
 #'   intervals. Default 0 (no bootstrap).
 #' @param delta Numeric or NULL. Equivalence margin for the nLoI. If given
@@ -46,15 +47,27 @@ utils::globalVariables("tree") # to avoid CRAN check errors for tidyverse progra
 #'
 #' @return An object of class \code{"eValidation"} containing:
 #'   \describe{
-#'     \item{Proximity_matrix_ensemble}{Ensemble proximity matrix (reordered, transformed)}
-#'     \item{Proximity_matrix_e2tree}{E2Tree proximity matrix (reordered, transformed)}
-#'     \item{mantel_test}{Mantel test result (NULL if \code{test = "measures"})}
+#'     \item{Proximity_matrix_ensemble}{Ensemble proximity matrix, in
+#'       hierarchical-clustering order and on the scale set by
+#'       \code{transform}; the row names are the original observation indices}
+#'     \item{Proximity_matrix_e2tree}{E2Tree proximity matrix, in the same
+#'       order and on the same scale}
+#'     \item{leaves}{Terminal node of each row of the two matrices, named by
+#'       the original observation index; pass it to the \code{leaves}
+#'       argument of \code{\link{loi}}, \code{\link{loi_perm}} or
+#'       \code{\link{localLoI}}}
+#'     \item{mantel_test}{Result of \code{ape::mantel.test()} (NULL if
+#'       \code{test = "measures"})}
 #'     \item{loi}{LoI object with decomposition (NULL if \code{test = "mantel"})}
-#'     \item{measures}{Data frame with observed values, null moments, Z, p-values,
-#'       kappa and bootstrap intervals}
+#'     \item{measures}{Data frame with one row per measure: \code{method},
+#'       \code{type}, \code{observed}, \code{null_mean} and \code{kappa};
+#'       \code{null_sd}, \code{z_stat} and \code{p_value} when
+#'       \code{n_perm > 0}; \code{ci_lower} and \code{ci_upper} when
+#'       \code{n_boot > 0} (NULL if \code{test = "mantel"})}
 #'     \item{permutation}{Permutation results (null distributions)}
 #'     \item{bootstrap}{Bootstrap replicates (if \code{n_boot > 0})}
 #'     \item{equivalence}{Equivalence test for the nLoI (if \code{delta} is given)}
+#'     \item{n, n_perm, n_boot, conf.level, transform, test}{The settings used}
 #'   }
 #'
 #' @details
@@ -65,6 +78,22 @@ utils::globalVariables("tree") # to avoid CRAN check errors for tidyverse progra
 #' nLoI. SSIM is computed under the canonical ordering given by hierarchical
 #' clustering of \code{D}; unlike the other measures it is not invariant to
 #' the ordering of the observations and is excluded from the bootstrap.
+#'
+#' Two Mantel statistics can appear in the output. The row \code{Mantel} of
+#' the measures table is the Pearson correlation between the off-diagonal
+#' entries of the two matrices, on the scale set by \code{transform}, tested
+#' (one-sided) with the same permutations as the other measures. The Mantel
+#' test run when \code{test} is \code{"both"} or \code{"mantel"} is
+#' \code{ape::mantel.test()} applied to \eqn{\hat{O}} and \eqn{1 - D} on the
+#' original scale, with its own 999 permutations: its \code{z.stat} is the sum
+#' of the cross-products of the off-diagonal entries and its p-value is
+#' two-sided.
+#'
+#' In regression, leaves whose weight \eqn{W_t} is zero have
+#' \eqn{\hat{o}_{ij} = 0} also between their own members. The within- and
+#' between-leaf decomposition of the nLoI is therefore computed from the
+#' leaves of \code{fit} (returned as \code{leaves}), not from
+#' \eqn{\hat{o}_{ij} > 0}.
 #'
 #' @examples
 #' \donttest{
@@ -94,7 +123,7 @@ utils::globalVariables("tree") # to avoid CRAN check errors for tidyverse progra
 eValidation <- function(data, fit, D, test = c("both", "mantel", "measures"),
                         graph = TRUE,
                         n_perm = 999, conf.level = 0.95, seed = NULL,
-                        transform = c("sqrt", "none"),
+                        transform = c("none", "sqrt"),
                         n_boot = 0, delta = NULL) {
 
   if (!is.null(seed)) set.seed(seed)
@@ -149,6 +178,7 @@ eValidation <- function(data, fit, D, test = c("both", "mantel", "measures"),
   Ps_ord <- Ps[ord, ord]
   rownames(Ps_ord) <- ord
   colnames(Ps_ord) <- ord
+  leaves <- stats::setNames(leaf[ord], ord)   # leaf of each row, in this order
 
   # === Mantel test ===
   mantel_test <- NULL
@@ -184,7 +214,7 @@ eValidation <- function(data, fit, D, test = c("both", "mantel", "measures"),
     o <- O[li]
     oh <- O_hat[li]
 
-    loi_result <- loi(O, O_hat, leaves = leaf[ord])
+    loi_result <- loi(O, O_hat, leaves = leaves)
     obs_vals <- .fid_all(o, oh, O, O_hat)
     is_div <- .fid_is_div[.fid_methods]
 
@@ -256,6 +286,7 @@ eValidation <- function(data, fit, D, test = c("both", "mantel", "measures"),
   results <- list(
     Proximity_matrix_ensemble = prox_ens,
     Proximity_matrix_e2tree   = prox_e2tree,
+    leaves                    = leaves,
     mantel_test               = mantel_test,
     loi                       = loi_result,
     measures                  = measures_df,
@@ -348,7 +379,7 @@ print.eValidation <- function(x, digits = 4, ...) {
               if (identical(x$transform, "sqrt")) "sqrt(O)" else "O"))
 
   if (!is.null(x$mantel_test)) {
-    cat(sprintf("  Mantel test (ape): z = %.2f, p = %.4f\n",
+    cat(sprintf("  Mantel test (ape, O-hat vs 1 - D): z = %.2f, p = %.4f (two-sided)\n",
                 x$mantel_test$z.stat, x$mantel_test$p))
   }
 
@@ -398,6 +429,7 @@ print.eValidation <- function(x, digits = 4, ...) {
                   x$loi$mean_in, x$loi$mean_out))
     }
     cat("\n  [div] lower = better; [sim] higher = better. kappa: 1 = perfect, 0 = random relabelling.\n")
+    cat("  Mantel row: Pearson correlation of the off-diagonal entries, on the scale above.\n")
     cat("  The permutation test assesses association only; fidelity is judged by the\n")
     cat("  observed values, kappa and their confidence intervals.\n\n")
   }

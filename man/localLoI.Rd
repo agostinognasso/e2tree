@@ -17,8 +17,9 @@ Typically \code{proximity(eValidation(...))$e2tree}.}
 partition and supply the node ids. Default \code{NULL}.}
 
 \item{leaves}{Optional vector of length \code{nrow(O)} giving the leaf of
-each row of the matrices, with the same meaning as in \code{\link{loi}}.
-It takes precedence over \code{fit}. Default \code{NULL}.}
+each row of the matrices, with the same meaning as in \code{\link{loi}}
+(for matrices taken from \code{\link{eValidation}}, its \code{leaves}
+component). It takes precedence over \code{fit}. Default \code{NULL}.}
 }
 \value{
 An object of class \code{"localLoI"}:
@@ -82,10 +83,10 @@ the leaves of \code{fit} to the rows and are reported in \code{obs}; without
 them the rows are assumed to follow the data order.
 
 \strong{Scale.} The decomposition is computed on the matrices it receives.
-The nLoI of the paper is defined on the proximities themselves, which
-\code{eValidation(..., transform = "none")} returns; with the default
-\code{transform = "sqrt"} the matrices are square-rooted and the index is
-that of the square-root scale.
+The nLoI is defined on the proximities themselves, which is what
+\code{\link{eValidation}} returns by default (\code{transform = "none"});
+with \code{transform = "sqrt"} the matrices are square-rooted and the index
+is that of the square-root scale.
 }
 \examples{
 \donttest{
@@ -97,7 +98,7 @@ D <- createDisMatrix(ensemble, data = iris, label = "Species",
 setting <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
 tree <- e2tree(Species ~ ., iris, D, ensemble, setting)
 
-vs    <- eValidation(iris, tree, D, graph = FALSE, transform = "none")
+vs    <- eValidation(iris, tree, D, graph = FALSE)
 prox  <- proximity(vs)
 ll    <- localLoI(prox$ensemble, prox$e2tree, fit = tree)
 print(ll)
