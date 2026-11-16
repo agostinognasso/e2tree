@@ -16,3 +16,5 @@ Appunti$
 ^doc$
 ^Meta$
 ^data-raw$
+^tests/testthat/Rplots\.pdf$
+^tests/testthat/testthat-problems\.rds$
