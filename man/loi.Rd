@@ -15,9 +15,11 @@ loi(O, O_hat, normalize = TRUE, leaves = NULL)
 If FALSE, returns raw LoI.}
 
 \item{leaves}{Optional vector of terminal-node memberships (length n, in
-the row order of the matrices). When given, within-node pairs are those
+the row order of the matrices), such as the \code{leaves} component of an
+\code{\link{eValidation}} object. When given, within-node pairs are those
 sharing a leaf; otherwise they are identified by \code{O_hat > 0}, which
-misclassifies pairs in leaves with zero weight.}
+misclassifies pairs in leaves with zero weight (possible in regression).
+The decomposition depends on it, the nLoI does not.}
 }
 \value{
 An object of class \code{"loi"} containing:
@@ -90,19 +92,19 @@ D <- createDisMatrix(ensemble, data = training, label = "Species",
 setting <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
 tree <- e2tree(Species ~ ., training, D, ensemble, setting)
 
-vs <- eValidation(training, tree, D)
+vs <- eValidation(training, tree, D, graph = FALSE)
 prox <- proximity(vs)
 O <- prox$ensemble
 O_hat <- prox$e2tree
 
-# Compute LoI with decomposition
-result <- loi(O, O_hat)
+# Compute LoI with decomposition (leaves: leaf of each row of O and O_hat)
+result <- loi(O, O_hat, leaves = vs$leaves)
 print(result)
 summary(result)
 plot(result)
 
 # Permutation test
-perm <- loi_perm(O, O_hat, n_perm = 999, seed = 42)
+perm <- loi_perm(O, O_hat, n_perm = 999, seed = 42, leaves = vs$leaves)
 print(perm)
 plot(perm)
 }

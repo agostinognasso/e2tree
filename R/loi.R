@@ -24,9 +24,11 @@
 #' @param O Proximity matrix from the ensemble model (n x n), values in the interval 0 to 1
 #' @param O_hat Proximity matrix estimated by E2Tree (n x n), values in the interval 0 to 1
 #' @param leaves Optional vector of terminal-node memberships (length n, in
-#'   the row order of the matrices). When given, within-node pairs are those
+#'   the row order of the matrices), such as the \code{leaves} component of an
+#'   \code{\link{eValidation}} object. When given, within-node pairs are those
 #'   sharing a leaf; otherwise they are identified by \code{O_hat > 0}, which
-#'   misclassifies pairs in leaves with zero weight.
+#'   misclassifies pairs in leaves with zero weight (possible in regression).
+#'   The decomposition depends on it, the nLoI does not.
 #' @param normalize Logical. If TRUE (default), returns nLoI (divided by M).
 #'   If FALSE, returns raw LoI.
 #'
@@ -78,19 +80,19 @@
 #' setting <- list(impTotal = 0.1, maxDec = 0.01, n = 2, level = 5)
 #' tree <- e2tree(Species ~ ., training, D, ensemble, setting)
 #'
-#' vs <- eValidation(training, tree, D)
+#' vs <- eValidation(training, tree, D, graph = FALSE)
 #' prox <- proximity(vs)
 #' O <- prox$ensemble
 #' O_hat <- prox$e2tree
 #'
-#' # Compute LoI with decomposition
-#' result <- loi(O, O_hat)
+#' # Compute LoI with decomposition (leaves: leaf of each row of O and O_hat)
+#' result <- loi(O, O_hat, leaves = vs$leaves)
 #' print(result)
 #' summary(result)
 #' plot(result)
 #'
 #' # Permutation test
-#' perm <- loi_perm(O, O_hat, n_perm = 999, seed = 42)
+#' perm <- loi_perm(O, O_hat, n_perm = 999, seed = 42, leaves = vs$leaves)
 #' print(perm)
 #' plot(perm)
 #' }
@@ -131,7 +133,9 @@ loi <- function(O, O_hat, normalize = TRUE, leaves = NULL) {
   # Between-node pairs: pairs in different leaves (or O_hat == 0 if the
   # partition is not supplied)
   if (!is.null(leaves)) {
-    if (length(leaves) != n) stop("leaves must have length nrow(O)")
+    if (length(leaves) != n || anyNA(leaves)) {
+      stop("leaves must have length nrow(O) and no missing values")
+    }
     is_within <- (leaves[row(O)] == leaves[col(O)])[idx]
   } else {
     is_within <- ohat_vec > 0
@@ -337,15 +341,19 @@ plot.loi <- function(x, ...) {
 #' @param n_boot Number of bootstrap replicates (observations resampled with
 #'   replacement, pairs of copies of the same observation excluded) for the
 #'   confidence interval of the nLoI. Default 0 (no interval).
+#' @param leaves Optional vector of terminal-node memberships, passed to
+#'   \code{\link{loi}} for the within/between decomposition of the observed
+#'   nLoI (see there). The test itself does not depend on it.
 #'
 #' @return An object of class \code{"loi_perm"} containing:
 #'   \item{observed}{Observed nLoI value and decomposition (loi object)}
 #'   \item{statistic}{Observed nLoI value (scalar)}
 #'   \item{p.value}{Test p-value (one-sided, less)}
 #'   \item{ci}{Bootstrap percentile confidence interval for the nLoI
-#'     (NA when \code{n_boot = 0}). Earlier versions returned a shifted
-#'     permutation interval, which is not a confidence interval for any
-#'     parameter and has been removed.}
+#'     (NA when \code{n_boot = 0}, in which case \code{print} and \code{plot}
+#'     omit it). Earlier versions returned a shifted permutation interval,
+#'     which is not a confidence interval for any parameter and has been
+#'     removed.}
 #'   \item{exact_null_mean}{Exact permutation mean of the nLoI}
 #'   \item{kappa}{Chance-corrected fidelity}
 #'   \item{null_dist}{Null distribution of nLoI values}
@@ -353,6 +361,7 @@ plot.loi <- function(x, ...) {
 #'   \item{null_sd}{Standard deviation of the null distribution}
 #'   \item{z_stat}{Standardized Z statistic}
 #'   \item{n_perm}{Number of permutations}
+#'   \item{n_boot}{Number of bootstrap replicates}
 #'   \item{conf.level}{Confidence level}
 #'
 #' @details
@@ -386,7 +395,7 @@ plot.loi <- function(x, ...) {
 #' @export
 loi_perm <- function(O, O_hat, n_perm = 999,
                      conf.level = 0.95,
-                     seed = NULL, n_boot = 0) {
+                     seed = NULL, n_boot = 0, leaves = NULL) {
 
   if (!is.null(seed)) set.seed(seed)
 
@@ -406,16 +415,20 @@ loi_perm <- function(O, O_hat, n_perm = 999,
   # OBSERVED STATISTIC (with full decomposition)
   # -------------------------------------------------------------------------
 
-  obs <- loi(O, O_hat)
+  obs <- loi(O, O_hat, leaves = leaves)
 
   # -------------------------------------------------------------------------
   # NULL DISTRIBUTION via row/column permutation
   # -------------------------------------------------------------------------
 
+  # Only the nLoI is needed under the null: it is computed on the permuted
+  # off-diagonal vector, without the decomposition and the exact null mean
+  # that loi() would also compute at every permutation.
+  li    <- which(lower.tri(O))
+  o_vec <- O[li]
   perm_one <- function(dummy) {
     perm_idx <- sample.int(n)
-    O_hat_perm <- O_hat[perm_idx, perm_idx]
-    loi(O, O_hat_perm)$nloi
+    .fid_nloi(o_vec, O_hat[perm_idx, perm_idx][li])
   }
 
   if (requireNamespace("future.apply", quietly = TRUE)) {
@@ -429,7 +442,10 @@ loi_perm <- function(O, O_hat, n_perm = 999,
   # P-VALUE (one-sided, less: good reconstruction = low nLoI)
   # -------------------------------------------------------------------------
 
-  p_value <- (1 + sum(null_dist <= obs$nloi, na.rm = TRUE)) / (1 + n_perm)
+  # observed value computed exactly as the permuted ones, so that ties are
+  # compared on the same footing
+  p_value <- (1 + sum(null_dist <= .fid_nloi(o_vec, O_hat[li]), na.rm = TRUE)) /
+    (1 + n_perm)
 
   # -------------------------------------------------------------------------
   # NULL DISTRIBUTION STATISTICS
@@ -469,6 +485,7 @@ loi_perm <- function(O, O_hat, n_perm = 999,
     null_sd    = null_sd,
     z_stat     = z_stat,
     n_perm     = n_perm,
+    n_boot     = n_boot,
     conf.level = conf.level
   )
   class(result) <- "loi_perm"
@@ -491,6 +508,10 @@ print.loi_perm <- function(x, digits = 4, ...) {
 
   cat(sprintf("  Observed nLoI:       %.*f\n", digits, x$statistic))
   cat(sprintf("  Null mean:           %.*f\n", digits, x$null_mean))
+  if (!is.null(x$exact_null_mean) && !is.na(x$exact_null_mean)) {
+    cat(sprintf("  Exact null mean:     %.*f   kappa = %.3f\n",
+                digits, x$exact_null_mean, x$kappa))
+  }
   cat(sprintf("  Null SD:             %.*f\n", digits, x$null_sd))
   cat(sprintf("  Z-statistic:         %.*f\n", digits, x$z_stat))
 
@@ -509,10 +530,16 @@ print.loi_perm <- function(x, digits = 4, ...) {
     cat(sprintf("  p-value:             %.*f %s\n", digits, x$p.value, stars))
   }
 
-  cat(sprintf("  %d%% CI:             [%.*f, %.*f]\n",
-              round(x$conf.level * 100),
-              digits, x$ci[1], digits, x$ci[2]))
   cat(sprintf("  Permutations:        %d (row/column)\n", x$n_perm))
+  if (all(is.finite(x$ci))) {
+    reps <- if (is.null(x$n_boot)) "" else
+      sprintf("  (%d replicates)", as.integer(x$n_boot))
+    cat(sprintf("  %d%% bootstrap CI:    [%.*f, %.*f]%s\n",
+                round(x$conf.level * 100),
+                digits, x$ci[1], digits, x$ci[2], reps))
+  } else {
+    cat("  Bootstrap CI:        not computed (set n_boot > 0)\n")
+  }
 
   cat("\n------------------------------------------------------------------------------\n")
   cat("  Decomposition (per-pair averages)\n")
@@ -580,20 +607,31 @@ plot.loi_perm <- function(x, ...) {
   lines(d, col = "darkgray", lwd = 2)
   abline(v = x$statistic, col = "red", lwd = 2, lty = 1)
   abline(v = x$null_mean, col = "darkgray", lwd = 2, lty = 2)
-  abline(v = x$ci[1], col = "blue", lwd = 1.5, lty = 3)
-  abline(v = x$ci[2], col = "blue", lwd = 1.5, lty = 3)
+  has_ci <- all(is.finite(x$ci))
+  if (has_ci) {
+    abline(v = x$ci[1], col = "blue", lwd = 1.5, lty = 3)
+    abline(v = x$ci[2], col = "blue", lwd = 1.5, lty = 3)
+  }
 
   p_str <- if (x$p.value < 0.0001) "p < 0.0001"
            else sprintf("p = %.4f", x$p.value)
 
+  leg <- c(sprintf("Observed (%.4f)", x$statistic),
+           sprintf("Null mean (%.4f)", x$null_mean))
+  leg_col <- c("red", "darkgray")
+  leg_lty <- c(1, 2)
+  leg_lwd <- c(2, 2)
+  if (has_ci) {
+    leg <- c(leg, paste0(round(x$conf.level * 100), "% bootstrap CI"))
+    leg_col <- c(leg_col, "blue")
+    leg_lty <- c(leg_lty, 3)
+    leg_lwd <- c(leg_lwd, 1.5)
+  }
   legend("topright",
-         legend = c(sprintf("Observed (%.4f)", x$statistic),
-                    sprintf("Null mean (%.4f)", x$null_mean),
-                    paste0(round(x$conf.level * 100), "% CI"),
-                    p_str),
-         col = c("red", "darkgray", "blue", NA),
-         lty = c(1, 2, 3, NA),
-         lwd = c(2, 2, 1.5, NA),
+         legend = c(leg, p_str),
+         col = c(leg_col, NA),
+         lty = c(leg_lty, NA),
+         lwd = c(leg_lwd, NA),
          bty = "n", cex = 0.85)
 
   # --- Panel 2: Per-pair decomposition ---

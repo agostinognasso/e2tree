@@ -4,7 +4,15 @@
 \alias{loi_perm}
 \title{Permutation Test for LoI}
 \usage{
-loi_perm(O, O_hat, n_perm = 999, conf.level = 0.95, seed = NULL, n_boot = 0)
+loi_perm(
+  O,
+  O_hat,
+  n_perm = 999,
+  conf.level = 0.95,
+  seed = NULL,
+  n_boot = 0,
+  leaves = NULL
+)
 }
 \arguments{
 \item{O}{Proximity matrix from the ensemble model (n x n)}
@@ -20,6 +28,10 @@ loi_perm(O, O_hat, n_perm = 999, conf.level = 0.95, seed = NULL, n_boot = 0)
 \item{n_boot}{Number of bootstrap replicates (observations resampled with
 replacement, pairs of copies of the same observation excluded) for the
 confidence interval of the nLoI. Default 0 (no interval).}
+
+\item{leaves}{Optional vector of terminal-node memberships, passed to
+\code{\link{loi}} for the within/between decomposition of the observed
+nLoI (see there). The test itself does not depend on it.}
 }
 \value{
 An object of class \code{"loi_perm"} containing:
@@ -27,9 +39,10 @@ An object of class \code{"loi_perm"} containing:
 \item{statistic}{Observed nLoI value (scalar)}
 \item{p.value}{Test p-value (one-sided, less)}
 \item{ci}{Bootstrap percentile confidence interval for the nLoI
-(NA when \code{n_boot = 0}). Earlier versions returned a shifted
-permutation interval, which is not a confidence interval for any
-parameter and has been removed.}
+(NA when \code{n_boot = 0}, in which case \code{print} and \code{plot}
+omit it). Earlier versions returned a shifted permutation interval,
+which is not a confidence interval for any parameter and has been
+removed.}
 \item{exact_null_mean}{Exact permutation mean of the nLoI}
 \item{kappa}{Chance-corrected fidelity}
 \item{null_dist}{Null distribution of nLoI values}
@@ -37,6 +50,7 @@ parameter and has been removed.}
 \item{null_sd}{Standard deviation of the null distribution}
 \item{z_stat}{Standardized Z statistic}
 \item{n_perm}{Number of permutations}
+\item{n_boot}{Number of bootstrap replicates}
 \item{conf.level}{Confidence level}
 }
 \description{

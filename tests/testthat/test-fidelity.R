@@ -112,3 +112,39 @@ test_that("loi uses the partition when leaves are supplied", {
   expect_equal(r0$n_within, 0)
   expect_equal(r1$loi_in, 0.5)
 })
+
+test_that("loi rejects a partition with missing values", {
+  p <- make_pair(n = 10)
+  expect_error(loi(p$O, p$Oh, leaves = c(NA, rep(1, 9))), "no missing values")
+  expect_error(loi(p$O, p$Oh, leaves = 1:3), "length nrow")
+})
+
+test_that("loi_perm: no empty CI in the output, leaves passed to the decomposition", {
+  p <- make_pair()
+  r0 <- loi_perm(p$O, p$Oh, n_perm = 49, seed = 1)
+  out0 <- capture.output(print(r0))
+  expect_true(any(grepl("not computed", out0)))
+  expect_false(any(grepl("NA", out0)))
+  expect_equal(r0$n_boot, 0)
+
+  r1 <- loi_perm(p$O, p$Oh, n_perm = 49, seed = 1, n_boot = 49)
+  expect_true(any(grepl("bootstrap CI", capture.output(print(r1)))))
+
+  # zero-weight leaf: the decomposition follows the partition, the test does not
+  O  <- matrix(c(1, .5, .2, .5, 1, .3, .2, .3, 1), 3)
+  Oh <- matrix(0, 3, 3); diag(Oh) <- 1
+  a <- loi_perm(O, Oh, n_perm = 19, seed = 2)
+  b <- loi_perm(O, Oh, n_perm = 19, seed = 2, leaves = c(1, 1, 2))
+  expect_equal(b$observed$n_within, 1)
+  expect_equal(a$observed$n_within, 0)
+  expect_equal(a$null_dist, b$null_dist)
+  expect_equal(a$p.value, b$p.value)
+})
+
+test_that("loi_perm null distribution is the nLoI of the permuted matrices", {
+  p <- make_pair(n = 30)
+  r <- loi_perm(p$O, p$Oh, n_perm = 499, seed = 3)
+  expect_equal(r$statistic, loi(p$O, p$Oh)$nloi)
+  expect_true(all(is.finite(r$null_dist)))
+  expect_equal(mean(r$null_dist), r$exact_null_mean, tolerance = 0.02)
+})
